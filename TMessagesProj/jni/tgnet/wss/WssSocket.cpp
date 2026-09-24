@@ -92,7 +92,11 @@ constexpr uint32_t kRouteFailuresBeforeSuppress = 3;
 // Туннель медленнее релея, поэтому держать в нём основной датацентр дольше
 // пары минут дороже, чем лишний раз проверить релей.
 constexpr int64_t kRouteSuppressTtlMs = 2 * 60 * 1000;
-constexpr int64_t kMediaRouteSuppressTtlMs = 30 * 60 * 1000;
+// A throttled network freezes TCP to Cloudflare after about 16 KB downstream
+// (logs (9) and (10): no tunnel session ever got past 15 KB). A tunnel socket
+// that stalls with requests pending before this much arrived is frozen, not
+// merely slow.
+constexpr uint64_t kTunnelFreezeBytes = 20 * 1024;
 // На старте десятки соединений всех аккаунтов открываются разом, и их
 // таймауты приходят пачкой. Одна пачка — один провал, а не «три подряд».
 constexpr int64_t kRouteFailureCoalesceMs = 2000;
@@ -152,13 +156,14 @@ void recordRouteUnreachable(const Route &route) {
         return;
     }
     health.lastFailureAt = now;
-    // Медиа-релеи kwsN-1 провайдеры режут целиком, пока основной kwsN жив:
-    // ждать три таймаута по 8 с значит полминуты без медиа, поэтому медиа
-    // уходит в туннель после первой же неудачи и остаётся там дольше.
-    const bool media = route.domain.find("-1.web.telegram.org") != std::string::npos;
-    const uint32_t threshold = media ? 1 : kRouteFailuresBeforeSuppress;
-    if (++health.consecutiveFailures >= threshold) {
-        health.suppressedUntil = now + (media ? kMediaRouteSuppressTtlMs : kRouteSuppressTtlMs);
+    // Медиа-релеи kwsN-1 раньше уходили в туннель после первой же неудачи и
+    // на 30 минут. На старте такая неудача случается почти всегда (соединения
+    // открываются пачкой), а туннель на мобильной сети замерзает после ~16 КБ:
+    // в logs (10) все сессии DC1 и DC5 через туннель умерли, а kws2-1 и kws4-1
+    // отдали мегабайты. Медиа теперь подчиняется тем же правилам, что и
+    // основной релей.
+    if (++health.consecutiveFailures >= kRouteFailuresBeforeSuppress) {
+        health.suppressedUntil = now + kRouteSuppressTtlMs;
     }
 }
 
@@ -374,6 +379,11 @@ bool Socket::open(const struct sockaddr *address, socklen_t addressLength, std::
     state = State::TcpConnecting;
     phase = transport::HandshakePhase::None;
     failureRecorded = false;
+    openedAtMs = monotonicMillis();
+    readyAtMs = 0;
+    firstDataAtMs = 0;
+    bytesOut = 0;
+    bytesIn = 0;
     const int result = ::connect(socketFd, address, addressLength);
     if (result == 0) {
         const bool connected = finishTcpConnect(diagnostic);
@@ -485,6 +495,7 @@ bool Socket::onEvent(uint32_t events, std::vector<std::vector<uint8_t>> &payload
         if (parseHttpResponse(&parseDiagnostic)) {
             state = State::Ready;
             phase = transport::HandshakePhase::WebSocketReady;
+            readyAtMs = monotonicMillis();
             noteUpgradeSucceeded();
             if (LOGS_ENABLED) {
                 DEBUG_D("wss_socket upgrade_ok domain=%s", routeConfig.domain.c_str());
@@ -738,6 +749,7 @@ bool Socket::parseFrames(std::vector<std::vector<uint8_t>> &payloads, std::strin
             }
             fragmentedMessage = !fin;
             if (length > 0) {
+                bytesIn += length;
                 payloads.emplace_back(payload, payload + length);
             }
         } else if (opcode == 0x0) {
@@ -747,6 +759,7 @@ bool Socket::parseFrames(std::vector<std::vector<uint8_t>> &payloads, std::strin
             }
             fragmentedMessage = !fin;
             if (length > 0) {
+                bytesIn += length;
                 payloads.emplace_back(payload, payload + length);
             }
         } else {
@@ -757,6 +770,7 @@ bool Socket::parseFrames(std::vector<std::vector<uint8_t>> &payloads, std::strin
     }
     if (!payloads.empty() && phase == transport::HandshakePhase::WebSocketReady) {
         phase = transport::HandshakePhase::FirstDataReceived;
+        firstDataAtMs = monotonicMillis();
         // Только реальные MTProto-данные доказывают, что релей жив: успешный
         // upgrade проходит и у релеев, которые дальше молча глотают трафик.
         recordRouteReachable(routeConfig);
@@ -820,6 +834,7 @@ bool Socket::write(const uint8_t *data, uint32_t size, std::string *diagnostic) 
     if (size == 0) {
         return true;
     }
+    bytesOut += size;
     if (!openingFrameSent) {
         openingFrame.insert(openingFrame.end(), data, data + size);
         if (openingFrame.size() < kObfuscationHeaderSize) {
@@ -887,10 +902,22 @@ void Socket::timedOut() {
     }
     if (!isReady()) {
         noteAttemptFailed();
+    } else if (routeConfig.tunnel && !speculative && bytesIn < kTunnelFreezeBytes) {
+        // The connection gave up waiting for answers to pending requests on a
+        // tunnel socket that has barely received anything: the network froze
+        // it. Counting it lets the tunnel be suppressed so the DC goes back to
+        // its relay or a direct connection instead of dying here repeatedly.
+        recordRouteUnreachable(routeConfig);
+        if (LOGS_ENABLED) {
+            DEBUG_D("wss_socket tunnel_stalled rx=%llu", (unsigned long long) bytesIn);
+        }
     }
 }
 
 void Socket::setSpeculative(bool value) {
+    if (speculative && !value) {
+        fromPool = true;
+    }
     speculative = value;
 }
 
@@ -950,10 +977,10 @@ void Socket::setIoWait(IoWait wait, const char *operation) {
         return;
     }
     ioWait = wait;
-    if (LOGS_ENABLED) {
-        DEBUG_D("wss_socket io_wait domain=%s state=%s wait=%s operation=%s",
-                routeConfig.domain.c_str(), stateName(), ioWaitName(), operation != nullptr ? operation : "unknown");
-    }
+    // Not logged: these transitions happen on every read and write and made
+    // up a sizeable share of the network log without explaining anything the
+    // wss_session summary does not.
+    (void) operation;
 }
 
 const char *Socket::stateName() const {
@@ -987,6 +1014,22 @@ const char *Socket::ioWaitName() const {
 }
 
 void Socket::close() {
+    if (socketFd >= 0 && LOGS_ENABLED) {
+        // One line per relay socket answers what used to take a script over
+        // the whole log: which route it took, how far the handshake got, how
+        // much went each way and how long it lived.
+        const int64_t now = monotonicMillis();
+        DEBUG_D("wss_session domain=%s relay=%s route=%s pool=%s tx=%llu rx=%llu ready_ms=%lld first_data_ms=%lld life_ms=%lld",
+                routeConfig.domain.c_str(),
+                routeConfig.connectHost.c_str(),
+                routeConfig.tunnel ? "tunnel" : (routeConfig.viaFallback ? "dns" : "ip"),
+                speculative ? "spare" : (fromPool ? "hit" : "no"),
+                (unsigned long long) bytesOut,
+                (unsigned long long) bytesIn,
+                (long long) (readyAtMs != 0 ? readyAtMs - openedAtMs : -1),
+                (long long) (firstDataAtMs != 0 ? firstDataAtMs - openedAtMs : -1),
+                (long long) (now - openedAtMs));
+    }
     if (ssl != nullptr) {
         SSL_free(ssl);
         ssl = nullptr;

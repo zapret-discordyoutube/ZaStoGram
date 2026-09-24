@@ -123,6 +123,13 @@ private:
     bool fragmentedMessage = false;
     bool failureRecorded = false;
     bool speculative = false;
+    bool fromPool = false;
+    // For the wss_session summary logged on close.
+    int64_t openedAtMs = 0;
+    int64_t readyAtMs = 0;
+    int64_t firstDataAtMs = 0;
+    uint64_t bytesOut = 0;
+    uint64_t bytesIn = 0;
     // SSL_write returned WANT_READ: the record can only continue after input.
     bool writeBlockedOnRead = false;
 };

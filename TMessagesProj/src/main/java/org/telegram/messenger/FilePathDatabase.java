@@ -162,19 +162,16 @@ public class FilePathDatabase {
         return false;
     }
 
+    // Lookups run on every media bind; only slow ones are worth a log line.
+    private static final long SLOW_LOOKUP_LOG_MS = 50;
+
     public String getPath(long documentId, int dc, int type, boolean useQueue) {
         final long start = System.currentTimeMillis();
         final String key = documentId + "_" + dc + "_" + type;
         String path = cache.get(key);
         if (path == NULL_PATH) {
-            if (BuildVars.DEBUG_VERSION) {
-                FileLog.d("get file path cached null id=" + documentId + " dc=" + dc + " type=" + type + " path=" + null + " in " + (System.currentTimeMillis() - start) + "ms");
-            }
             return null;
         } else if (path != null) {
-            if (BuildVars.DEBUG_VERSION) {
-                FileLog.d("get file path cached id=" + documentId + " dc=" + dc + " type=" + type + " path=" + path + " in " + (System.currentTimeMillis() - start) + "ms");
-            }
             return path;
         }
         if (dispatchQueue != null && dispatchQueue.getHandler() != null && Thread.currentThread() == dispatchQueue.getHandler().getLooper().getThread()) {
@@ -193,8 +190,8 @@ public class FilePathDatabase {
                         cursor = database.queryFinalized("SELECT path FROM paths WHERE document_id = " + documentId + " AND dc_id = " + dc + " AND type = " + type);
                         if (cursor.next()) {
                             res[0] = cursor.stringValue(0);
-                            if (BuildVars.DEBUG_VERSION) {
-                                FileLog.d("get file path id=" + documentId + " dc=" + dc + " type=" + type + " path=" + res[0] + " in " + (System.currentTimeMillis() - start) + "ms");
+                            if (BuildVars.DEBUG_VERSION && System.currentTimeMillis() - start >= SLOW_LOOKUP_LOG_MS) {
+                                FileLog.d("slow file path lookup id=" + documentId + " dc=" + dc + " type=" + type + " in " + (System.currentTimeMillis() - start) + "ms");
                             }
                         }
                     } catch (Throwable e) {
@@ -227,8 +224,8 @@ public class FilePathDatabase {
                 cursor = database.queryFinalized("SELECT path FROM paths WHERE document_id = " + documentId + " AND dc_id = " + dc + " AND type = " + type);
                 if (cursor.next()) {
                     res = cursor.stringValue(0);
-                    if (BuildVars.DEBUG_VERSION) {
-                        FileLog.d("get file path id=" + documentId + " dc=" + dc + " type=" + type + " path=" + res + " in " + (System.currentTimeMillis() - start) + "ms");
+                    if (BuildVars.DEBUG_VERSION && System.currentTimeMillis() - start >= SLOW_LOOKUP_LOG_MS) {
+                        FileLog.d("slow file path lookup id=" + documentId + " dc=" + dc + " type=" + type + " in " + (System.currentTimeMillis() - start) + "ms");
                     }
                 }
             } catch (SQLiteException e) {

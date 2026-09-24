@@ -42,6 +42,15 @@ extern bool NETWORK_DEBUG_LOGS_ENABLED;
 #define DEBUG_W FileLog::getInstance().w
 #define DEBUG_D FileLog::getInstance().d
 
+// typeid(...).name() is mangled ("14TL_api_request"); logs only need the
+// readable part. Returns a pointer into the same static string.
+inline const char *logTypeName(const char *mangled) {
+    while (*mangled >= '0' && *mangled <= '9') {
+        ++mangled;
+    }
+    return mangled;
+}
+
 #define DEBUG_REF FileLog::getInstance().ref
 #define DEBUG_DELREF FileLog::getInstance().delref
 

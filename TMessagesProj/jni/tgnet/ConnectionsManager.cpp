@@ -753,7 +753,6 @@ void ConnectionsManager::cleanUp(bool resetKeys, int32_t datacenterId) {
                 request->onComplete(nullptr, error, 0, 0, request->messageId, dcId);
                 delete error;
             }
-            DEBUG_D("1) erase request %d 0x%" PRIx64, request->requestToken, request->messageId);
             iter = runningRequests.erase(iter);
         }
         quickAckIdToRequestIds.clear();
@@ -1348,7 +1347,9 @@ TLObject *ConnectionsManager::TLdeserialize(TLObject *request, uint32_t bytes, N
 void ConnectionsManager::processServerResponse(TLObject *message, int64_t messageId, int32_t messageSeqNo, int64_t messageSalt, Connection *connection, int64_t innerMsgId, int64_t containerMessageId) {
     const std::type_info &typeInfo = typeid(*message);
 
-    if (LOGS_ENABLED) DEBUG_D("process server response %p - %s", message, typeInfo.name());
+    // Top-level objects are already logged by the connection as "received
+    // object"; only the items unpacked from a container need their own line.
+    if (LOGS_ENABLED && innerMsgId != 0) DEBUG_D("process inner %s", logTypeName(typeInfo.name()));
     auto timeMessage = (int64_t) ((messageId != 0 ? messageId : innerMsgId) / 4294967296.0 * 1000);
 
     Datacenter *datacenter = connection->getDatacenter();
@@ -1416,7 +1417,6 @@ void ConnectionsManager::processServerResponse(TLObject *message, int64_t messag
                     delegate->onUnparsedMessageReceived(innerMessageId, innerMessage->unparsedBody.get(), connection->getConnectionType(), instanceNum);
                 }
             } else {
-                if (LOGS_ENABLED) DEBUG_D("inner message %d id 0x%" PRIx64 " process", a, innerMessageId);
                 processServerResponse(innerMessage->body.get(), 0, innerMessage->seqno, messageSalt, connection, innerMessageId, messageId);
             }
             connection->addProcessedMessageId(innerMessageId);
@@ -1466,7 +1466,6 @@ void ConnectionsManager::processServerResponse(TLObject *message, int64_t messag
                 int32_t dcId = request->datacenterId != DEFAULT_DATACENTER_ID ? request->datacenterId : currentDatacenterId;
                 request->onComplete(response, nullptr, connection->getCurrentNetworkType(), timeMessage, requestMid, dcId);
                 request->completed = true;
-                DEBUG_D("4) erase request %d 0x%" PRIx64, request->requestToken, request->messageId);
                 runningRequests.erase(iter);
                 break;
             }
@@ -1791,7 +1790,6 @@ void ConnectionsManager::processServerResponse(TLObject *message, int64_t messag
                     }
                     request->completed = true;
                     removeRequestFromGuid(request->requestToken);
-                    if (LOGS_ENABLED) DEBUG_D("5) erase request %d 0x%" PRIx64, request->requestToken, request->messageId);
                     runningRequests.erase(iter);
                 } else {
                     request->messageId = 0;
@@ -2258,11 +2256,10 @@ int32_t ConnectionsManager::sendRequest(TLObject *object, onCompleteFunc onCompl
 #ifdef ANDROID
 void ConnectionsManager::sendRequest(TLObject *object, onCompleteFunc onComplete, onQuickAckFunc onQuickAck, onWriteToSocketFunc onWriteToSocket, onRequestClearFunc onClear, uint32_t flags, uint32_t datacenterId, ConnectionType connectionType, bool immediate, int32_t requestToken) {
     scheduleTask([&, requestToken, object, onComplete, onQuickAck, onWriteToSocket, onClear, flags, datacenterId, connectionType, immediate] {
-        if (LOGS_ENABLED) DEBUG_D("send request %p - %s", object, typeid(*object).name());
+        if (LOGS_ENABLED) DEBUG_D("send request token %d - %s dc %u type %d", requestToken, logTypeName(typeid(*object).name()), datacenterId, (int) connectionType);
         auto request = new Request(instanceNum, requestToken, connectionType, flags, datacenterId, onComplete, onQuickAck, onWriteToSocket, onClear);
         request->rawRequest = object;
         request->rpcRequest = wrapInLayer(object, getDatacenterWithId(datacenterId), request);
-        if (LOGS_ENABLED) DEBUG_D("send request wrapped %p - %s", request->rpcRequest.get(), typeid(*(request->rpcRequest.get())).name());
         auto cancelledIterator = tokensToBeCancelled.find(request->requestToken);
         if (cancelledIterator != tokensToBeCancelled.end()) {
             if (LOGS_ENABLED) DEBUG_D("(2) request is cancelled before sending, token %d", requestToken);
@@ -2428,7 +2425,6 @@ bool ConnectionsManager::cancelRequestInternal(int32_t token, int64_t messageId,
                         Request *request2 = iter2->get();
                         if (request2->requestToken == token && !request2->doNotClearOnDrop) {
                             request2->disableClearCallback = true;
-                            if (LOGS_ENABLED) DEBUG_D("6) erase request %d 0x%" PRIx64, request2->requestToken, request2->messageId);
                             runningRequests.erase(iter2);
                             break;
                         }
@@ -2461,7 +2457,6 @@ bool ConnectionsManager::cancelRequestInternal(int32_t token, int64_t messageId,
             const char* type = request->rawRequest == nullptr ? "" : typeid(*request->rawRequest).name();
             if (LOGS_ENABLED) DEBUG_D("cancelled running rpc request %p - %s, of messageId 0x%" PRIx64 " notify=%d", request->rawRequest, type, request->messageId, notifyServer);
             if (erase) {
-                if (LOGS_ENABLED) DEBUG_D("7) erase request %d 0x%" PRIx64, request->requestToken, request->messageId);
                 runningRequests.erase(iter);
             }
             if (removeFromClass) {
@@ -2872,7 +2867,6 @@ void ConnectionsManager::processRequestQueue(uint32_t connectionTypes, uint32_t 
         Request *request = iter->get();
         if (request->cancelled) {
             if (request->doNotClearOnDrop && currentTime > request->clearAfter) {
-                DEBUG_D("16) erase request %d 0x%" PRIx64, request->requestToken, request->messageId);
                 iter = runningRequests.erase(iter);
             } else {
                 iter++;
@@ -2943,7 +2937,6 @@ void ConnectionsManager::processRequestQueue(uint32_t connectionTypes, uint32_t 
             if (request->startTime != 0 && abs(currentTime - requestStartTime) >= timeout) {
                 if (LOGS_ENABLED) DEBUG_D("move %s to requestsQueue", typeid(*request->rawRequest).name());
                 requestsQueue.push_back(std::move(*iter));
-                DEBUG_D("10) erase request %d 0x%" PRIx64, request->requestToken, request->messageId);
                 iter = runningRequests.erase(iter);
                 continue;
             }
@@ -2967,7 +2960,6 @@ void ConnectionsManager::processRequestQueue(uint32_t connectionTypes, uint32_t 
             if (request->needInitRequest(requestDatacenter, currentVersion) && !request->hasInitFlag() && request->rawRequest->isNeedLayer()) {
                 if (LOGS_ENABLED) DEBUG_D("move %p - %s to requestsQueue because of initConnection", request->rawRequest, typeid(*request->rawRequest).name());
                 requestsQueue.push_back(std::move(*iter));
-                DEBUG_D("11) erase request %d 0x%" PRIx64, request->requestToken, request->messageId);
                 iter = runningRequests.erase(iter);
                 continue;
             }
@@ -3057,7 +3049,6 @@ void ConnectionsManager::processRequestQueue(uint32_t connectionTypes, uint32_t 
                         int32_t dcId = request->datacenterId != DEFAULT_DATACENTER_ID ? request->datacenterId : currentDatacenterId;
                         request->onComplete(nullptr, error, connection->getCurrentNetworkType(), 0, request->messageId, dcId);
                         delete error;
-                        DEBUG_D("12) erase request %d 0x%" PRIx64, request->requestToken, request->messageId);
                         iter = runningRequests.erase(iter);
                         continue;
                     }
@@ -3366,7 +3357,6 @@ void ConnectionsManager::processRequestQueue(uint32_t connectionTypes, uint32_t 
         if (request->rawRequest->initFunc != nullptr) {
             request->rawRequest->initFunc(request->messageId);
         }
-        if (LOGS_ENABLED) DEBUG_D("messageId for token = %d, 0x%" PRIx64, request->requestToken, request->messageId);
 
         uint32_t requestLength = request->rpcRequest->getObjectSize();
         if (request->requestFlags & RequestFlagCanCompress) {

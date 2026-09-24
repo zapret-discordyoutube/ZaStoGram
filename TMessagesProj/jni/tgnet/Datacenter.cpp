@@ -8,6 +8,8 @@
 
 #include <stdlib.h>
 #include <algorithm>
+#include <map>
+#include <string>
 #include <openssl/rand.h>
 #include <openssl/sha.h>
 #include <openssl/bn.h>
@@ -1130,13 +1132,12 @@ NativeByteBuffer *Datacenter::createRequestsData(std::vector<std::unique_ptr<Net
         } else {
             messageBody = networkMessage->message->body.get();
         }
-        if (LOGS_ENABLED) DEBUG_D("connection(%p, account%u, dc%u, type %d) send message (session: 0x%" PRIx64 ", seqno: %d, messageid: 0x%" PRIx64 "): %s(%p)", connection, instanceNum, datacenterId, connection->getConnectionType(), (uint64_t) connection->getSessionId(), networkMessage->message->seqno, (uint64_t) networkMessage->message->msg_id, typeid(*messageBody).name(), messageBody);
-
         auto messageTime = (int64_t) (networkMessage->message->msg_id / 4294967296.0 * 1000);
         int64_t currentTime = ConnectionsManager::getInstance(instanceNum).getCurrentTimeMillis() + (int64_t) ConnectionsManager::getInstance(instanceNum).getTimeDifference() * 1000;
+        const bool wrapInContainer = !pfsInit && (networkMessage->forceContainer || messageTime < currentTime - 30000 || messageTime > currentTime + 25000);
+        if (LOGS_ENABLED) DEBUG_D("connection(%p, account%u, dc%u, type %d) send message (session: 0x%" PRIx64 ", seqno: %d, messageid: 0x%" PRIx64 "): %s%s", connection, instanceNum, datacenterId, connection->getConnectionType(), (uint64_t) connection->getSessionId(), networkMessage->message->seqno, (uint64_t) networkMessage->message->msg_id, logTypeName(typeid(*messageBody).name()), wrapInContainer ? " wrapped" : "");
 
-        if (!pfsInit && (networkMessage->forceContainer || messageTime < currentTime - 30000 || messageTime > currentTime + 25000)) {
-            if (LOGS_ENABLED) DEBUG_D("wrap message in container");
+        if (wrapInContainer) {
             auto messageContainer = new TL_msg_container();
             messageContainer->messages.push_back(std::move(networkMessage->message));
 
@@ -1149,9 +1150,16 @@ NativeByteBuffer *Datacenter::createRequestsData(std::vector<std::unique_ptr<Net
             messageSeqNo = networkMessage->message->seqno;
         }
     } else {
-        if (LOGS_ENABLED) DEBUG_D("start write messages to container");
         auto messageContainer = new TL_msg_container();
         size_t count = requests.size();
+        // One line per container instead of one per message: after every
+        // reconnect the same dozens of requests are resent, and per-message
+        // lines were a quarter of the whole network log.
+        std::map<std::string, uint32_t> typeCounts;
+        int32_t firstSeqNo = 0;
+        int32_t lastSeqNo = 0;
+        int64_t firstMessageId = 0;
+        int64_t lastMessageId = 0;
         for (uint32_t a = 0; a < count; a++) {
             NetworkMessage *networkMessage = requests[a].get();
             if (networkMessage->message->outgoingBody != nullptr) {
@@ -1159,8 +1167,29 @@ NativeByteBuffer *Datacenter::createRequestsData(std::vector<std::unique_ptr<Net
             } else {
                 messageBody = networkMessage->message->body.get();
             }
-            if (LOGS_ENABLED) DEBUG_D("connection(%p, account%u, dc%u, type %d) send message (session: 0x%" PRIx64 ", seqno: %d, messageid: 0x%" PRIx64 "): %s(%p)", connection, instanceNum, datacenterId, connection->getConnectionType(), (uint64_t) connection->getSessionId(), networkMessage->message->seqno, (uint64_t) networkMessage->message->msg_id, typeid(*messageBody).name(), messageBody);
+            if (LOGS_ENABLED) {
+                typeCounts[logTypeName(typeid(*messageBody).name())]++;
+                if (a == 0) {
+                    firstSeqNo = networkMessage->message->seqno;
+                    firstMessageId = networkMessage->message->msg_id;
+                }
+                lastSeqNo = networkMessage->message->seqno;
+                lastMessageId = networkMessage->message->msg_id;
+            }
             messageContainer->messages.push_back(std::unique_ptr<TL_message>(std::move(networkMessage->message)));
+        }
+        if (LOGS_ENABLED) {
+            std::string types;
+            for (auto &entry : typeCounts) {
+                if (!types.empty()) {
+                    types += ",";
+                }
+                types += entry.first;
+                if (entry.second > 1) {
+                    types += "x" + std::to_string(entry.second);
+                }
+            }
+            DEBUG_D("connection(%p, account%u, dc%u, type %d) send container (session: 0x%" PRIx64 ", count: %u, seqno: %d..%d, messageid: 0x%" PRIx64 "..0x%" PRIx64 "): %s", connection, instanceNum, datacenterId, connection->getConnectionType(), (uint64_t) connection->getSessionId(), (unsigned int) count, firstSeqNo, lastSeqNo, (uint64_t) firstMessageId, (uint64_t) lastMessageId, types.c_str());
         }
         messageId = ConnectionsManager::getInstance(instanceNum).generateMessageId();
         messageBody = messageContainer;
