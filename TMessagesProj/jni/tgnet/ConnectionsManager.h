@@ -37,6 +37,14 @@ class TL_auth_exportedAuthorization;
 class ByteArray;
 class TL_config;
 class EventObject;
+
+namespace tgnet {
+namespace wss {
+class Pool;
+struct Route;
+class Socket;
+}
+}
 class Config;
 class ProxyCheckInfo;
 
@@ -190,6 +198,9 @@ private:
     bool registeringForPush = false;
     int64_t lastPushPingTime = 0;
     int64_t lastProbeReapMs = 0;
+    std::unique_ptr<tgnet::wss::Pool> wssPool;
+    int64_t lastWssPoolTickMs = 0;
+    std::unique_ptr<tgnet::wss::Socket> takePooledWssSocket(const tgnet::wss::Route &route);
     int32_t nextPingTimeOffset = 60000 * 3;
     int64_t sendingPushPingTime = 0;
     bool sendingPushPing = false;
@@ -228,6 +239,9 @@ private:
     uint32_t proxyConfigGeneration = 0;
     std::string proxyActivationOrigin = "active_socket";
     bool wssEnabled = false;
+    // Set once any connection has chosen its transport; before that a WSS
+    // toggle has nothing to reconnect.
+    bool transportConnectionOpened = false;
     int64_t transportSettingsStartupSettleUntil = 0;
     bool transportSettingsReconnectPending = false;
     int32_t lastPingProxyId = 2000000;

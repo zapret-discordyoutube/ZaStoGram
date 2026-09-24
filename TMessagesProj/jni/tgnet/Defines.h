@@ -108,7 +108,8 @@ enum EventObjectType {
     EventObjectTypeConnection,
     EventObjectTypeTimer,
     EventObjectTypePipe,
-    EventObjectTypeEvent
+    EventObjectTypeEvent,
+    EventObjectTypeWssPool
 };
 
 enum FileLoadState {

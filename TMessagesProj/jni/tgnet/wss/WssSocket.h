@@ -36,6 +36,10 @@ struct Route {
 // ZaStoGram Cloudflare Worker, which opens dcAddress (IPv4) over TCP itself.
 bool OfficialRoute(int32_t dcId, bool mediaConnection, bool testBackend, const std::string &dcAddress, Route *route);
 
+// Whether OfficialRoute would still hand out this exact route: not suppressed
+// and not switched to the relay's DNS name.
+bool RouteUsable(const Route &route);
+
 class Socket final : public transport::Socket {
 public:
     explicit Socket(Route route);
@@ -57,6 +61,10 @@ public:
     void close() override;
 
     const Route &route() const;
+
+    // A pool spare nobody is waiting for: its failures say too little about
+    // the relay to move real connections to another address or the tunnel.
+    void setSpeculative(bool value);
 
 private:
     enum class State : uint8_t {
@@ -89,6 +97,8 @@ private:
     const char *stateName() const;
     const char *ioWaitName() const;
     Route routeConfig;
+    // Numeric address this socket dialled, to tell a dropped flow from a dead relay.
+    std::string peerAddress;
     SSL *ssl = nullptr;
     int socketFd = -1;
     State state = State::Closed;
@@ -111,6 +121,7 @@ private:
     bool openingFrameSent = false;
     bool fragmentedMessage = false;
     bool failureRecorded = false;
+    bool speculative = false;
 };
 
 std::unique_ptr<transport::Socket> CreateSocket(Route route);

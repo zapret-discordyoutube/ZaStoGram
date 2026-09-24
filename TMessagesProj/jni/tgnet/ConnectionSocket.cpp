@@ -3464,6 +3464,7 @@ void ConnectionSocket::openConnection(std::string address, uint16_t port, std::s
     stateMachine.endpointGate.webProxyRecheckAt = 0;
     stateMachine.endpointGate.webProxyWaitReason = 0;
 
+    manager.transportConnectionOpened = true;
     bool shouldUseWss = overrideProxyAddress.empty()
             && manager.wssEnabled
             && proxyAddress->empty();
@@ -3853,7 +3854,15 @@ void ConnectionSocket::openConnectionInternal(bool ipv6) {
                 ? reinterpret_cast<const sockaddr *>(&socketAddress6)
                 : reinterpret_cast<const sockaddr *>(&socketAddress);
         const socklen_t addressLength = ipv6 ? sizeof(socketAddress6) : sizeof(socketAddress);
-        if (!currentWssTransport->open(address, addressLength, &diagnostic)) {
+        // A spare from the pool has already done TCP, TLS and the upgrade; its
+        // first EPOLLOUT below goes straight to on_connected.
+        std::unique_ptr<tgnet::wss::Socket> pooled = ipv6
+                ? nullptr
+                : ConnectionsManager::getInstance(instanceNum).takePooledWssSocket(currentWssRoute);
+        if (pooled != nullptr) {
+            currentWssTransport = std::move(pooled);
+            if (LOGS_ENABLED) DEBUG_D("connection(%p) wss_startup pool_hit domain=%s", this, currentWssRoute.domain.c_str());
+        } else if (!currentWssTransport->open(address, addressLength, &diagnostic)) {
             proxyCheckDiagnostic = diagnostic.empty() ? "wss_tcp_connect_failed" : diagnostic;
             if (LOGS_ENABLED) DEBUG_E("connection(%p) wss_startup open failed diagnostic=%s", this, proxyCheckDiagnostic.c_str());
             closeSocket(1, -1);

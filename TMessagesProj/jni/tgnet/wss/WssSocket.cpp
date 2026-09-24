@@ -89,15 +89,43 @@ bool preferFallback(const Route &route) {
 // маршрут WSS для этого датацентра временно отключается, и клиент идёт к нему
 // обычным путём. Счётчик сбрасывается только реально полученными данными.
 constexpr uint32_t kRouteFailuresBeforeSuppress = 3;
-constexpr int64_t kRouteSuppressTtlMs = 10 * 60 * 1000;
+// Туннель медленнее релея, поэтому держать в нём основной датацентр дольше
+// пары минут дороже, чем лишний раз проверить релей.
+constexpr int64_t kRouteSuppressTtlMs = 2 * 60 * 1000;
 constexpr int64_t kMediaRouteSuppressTtlMs = 30 * 60 * 1000;
+// На старте десятки соединений всех аккаунтов открываются разом, и их
+// таймауты приходят пачкой. Одна пачка — один провал, а не «три подряд».
+constexpr int64_t kRouteFailureCoalesceMs = 2000;
+// Провайдер глотает SYN отдельного потока, а соседний сокет к тому же адресу
+// проходит. Пока адрес недавно принимал TCP, таймаут соединения — шум потока,
+// а не недоступный релей.
+constexpr int64_t kRecentTcpSuccessMs = 30 * 1000;
 
 struct RouteHealth {
     uint32_t consecutiveFailures = 0;
     int64_t suppressedUntil = 0;
+    int64_t lastFailureAt = 0;
 };
 
 std::map<std::string, RouteHealth> routeHealth;
+std::map<std::string, int64_t> tcpSuccessByAddress;
+
+void recordTcpConnected(const std::string &address) {
+    if (address.empty()) {
+        return;
+    }
+    std::lock_guard<std::mutex> lock(relayPreferencesMutex);
+    tcpSuccessByAddress[address] = monotonicMillis();
+}
+
+bool tcpRecentlyConnected(const std::string &address) {
+    if (address.empty()) {
+        return false;
+    }
+    std::lock_guard<std::mutex> lock(relayPreferencesMutex);
+    auto it = tcpSuccessByAddress.find(address);
+    return it != tcpSuccessByAddress.end() && monotonicMillis() - it->second < kRecentTcpSuccessMs;
+}
 
 bool routeSuppressed(const std::string &domain) {
     std::lock_guard<std::mutex> lock(relayPreferencesMutex);
@@ -116,16 +144,21 @@ bool routeSuppressed(const std::string &domain) {
 void recordRouteUnreachable(const Route &route) {
     std::lock_guard<std::mutex> lock(relayPreferencesMutex);
     RouteHealth &health = routeHealth[route.domain];
-    if (health.suppressedUntil > monotonicMillis()) {
+    const int64_t now = monotonicMillis();
+    if (health.suppressedUntil > now) {
         return;
     }
+    if (health.lastFailureAt != 0 && now - health.lastFailureAt < kRouteFailureCoalesceMs) {
+        return;
+    }
+    health.lastFailureAt = now;
     // Медиа-релеи kwsN-1 провайдеры режут целиком, пока основной kwsN жив:
     // ждать три таймаута по 8 с значит полминуты без медиа, поэтому медиа
     // уходит в туннель после первой же неудачи и остаётся там дольше.
     const bool media = route.domain.find("-1.web.telegram.org") != std::string::npos;
     const uint32_t threshold = media ? 1 : kRouteFailuresBeforeSuppress;
     if (++health.consecutiveFailures >= threshold) {
-        health.suppressedUntil = monotonicMillis() + (media ? kMediaRouteSuppressTtlMs : kRouteSuppressTtlMs);
+        health.suppressedUntil = now + (media ? kMediaRouteSuppressTtlMs : kRouteSuppressTtlMs);
     }
 }
 
@@ -134,6 +167,7 @@ void recordRouteReachable(const Route &route) {
     RouteHealth &health = routeHealth[route.domain];
     health.consecutiveFailures = 0;
     health.suppressedUntil = 0;
+    health.lastFailureAt = 0;
 }
 
 void recordAttemptFailed(const Route &route) {
@@ -301,6 +335,10 @@ bool OfficialRoute(int32_t dcId, bool mediaConnection, bool testBackend, const s
     return true;
 }
 
+bool RouteUsable(const Route &route) {
+    return !routeSuppressed(route.domain) && preferFallback(route) == route.viaFallback;
+}
+
 Socket::Socket(Route route) : routeConfig(std::move(route)) {
 }
 
@@ -314,6 +352,13 @@ bool Socket::open(const struct sockaddr *address, socklen_t addressLength, std::
         setDiagnostic(diagnostic, "wss_invalid_address");
         return false;
     }
+    char addressText[INET6_ADDRSTRLEN] = {0};
+    const void *rawAddress = address->sa_family == AF_INET
+            ? static_cast<const void *>(&reinterpret_cast<const struct sockaddr_in *>(address)->sin_addr)
+            : static_cast<const void *>(&reinterpret_cast<const struct sockaddr_in6 *>(address)->sin6_addr);
+    peerAddress = inet_ntop(address->sa_family, rawAddress, addressText, sizeof(addressText)) != nullptr
+            ? addressText
+            : std::string();
     socketFd = ::socket(address->sa_family, SOCK_STREAM, 0);
     if (socketFd < 0) {
         setDiagnostic(diagnostic, "wss_socket_create_failed");
@@ -369,6 +414,7 @@ bool Socket::finishTcpConnect(std::string *diagnostic) {
         return false;
     }
     phase = transport::HandshakePhase::TcpConnected;
+    recordTcpConnected(peerAddress);
     if (LOGS_ENABLED) {
         DEBUG_D("wss_socket tcp_connected domain=%s", routeConfig.domain.c_str());
     }
@@ -831,9 +877,26 @@ void Socket::timedOut() {
     }
 }
 
+void Socket::setSpeculative(bool value) {
+    speculative = value;
+}
+
 void Socket::noteAttemptFailed() {
     if (!failureRecorded && state != State::Ready) {
         failureRecorded = true;
+        if (speculative) {
+            return;
+        }
+        if (phase == transport::HandshakePhase::None && tcpRecentlyConnected(peerAddress)) {
+            // Соседние сокеты к этому адресу только что подключались: провайдер
+            // съел SYN одного потока. Новый сокет пройдёт, а переход на запасной
+            // адрес или в туннель здесь только навредит.
+            if (LOGS_ENABLED) {
+                DEBUG_D("wss_socket flow_timeout_ignored domain=%s address=%s",
+                        routeConfig.domain.c_str(), peerAddress.c_str());
+            }
+            return;
+        }
         recordAttemptFailed(routeConfig);
         if (phase == transport::HandshakePhase::None) {
             // Не дошли даже до установленного TCP: адрес релея недоступен, а не

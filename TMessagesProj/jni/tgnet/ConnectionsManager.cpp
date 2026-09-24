@@ -36,6 +36,7 @@
 #include "ProxyCheckInfo.h"
 #include "Handshake.h"
 #include "mtproxy/MtProxyProbeCoordinator.h"
+#include "wss/WssPool.h"
 
 #ifdef ANDROID
 #include <jni.h>
@@ -192,6 +193,9 @@ ConnectionsManager::ConnectionsManager(int32_t instance) {
         exit(1);
     }
 
+    wssPool = std::make_unique<tgnet::wss::Pool>();
+    wssPool->attach(epolFd, [this] { return getCurrentTimeMonotonicMillis(); });
+
     pthread_mutex_init(&mutex, nullptr);
 }
 
@@ -273,6 +277,9 @@ void ConnectionsManager::checkPendingTasks() {
 }
 
 void ConnectionsManager::select() {
+    // The previous epoll batch is fully processed: retired pool sockets can
+    // no longer receive a stale event.
+    wssPool->collectGarbage();
     checkPendingTasks();
     int eventsCount = epoll_wait(epolFd, epollEvents, 128, callEvents(getCurrentTimeMonotonicMillis()));
     checkPendingTasks();
@@ -296,6 +303,10 @@ void ConnectionsManager::select() {
     if (now - lastProbeReapMs >= 1000) {
         lastProbeReapMs = now;
         MtProxyProbeCoordinator::reapExpired(now);
+    }
+    if (now - lastWssPoolTickMs >= 1000) {
+        lastWssPoolTickMs = now;
+        wssPool->tick(now, wssEnabled && networkAvailable && !networkPaused && proxyAddress.empty() && !testBackend);
     }
 
     Datacenter *datacenter = getDatacenterWithId(currentDatacenterId);
@@ -416,6 +427,10 @@ void ConnectionsManager::removeEvent(EventObject *eventObject) {
             break;
         }
     }
+}
+
+std::unique_ptr<tgnet::wss::Socket> ConnectionsManager::takePooledWssSocket(const tgnet::wss::Route &route) {
+    return wssPool->take(route, getCurrentTimeMonotonicMillis());
 }
 
 void ConnectionsManager::wakeup() {
@@ -4240,8 +4255,13 @@ void ConnectionsManager::setWssTransportEnabled(bool enabled) {
     scheduleTask([&, enabled] {
         if (wssEnabled != enabled) {
             wssEnabled = enabled;
-            if (LOGS_ENABLED) DEBUG_D("wss_startup enabled=%d", wssEnabled ? 1 : 0);
-            requestTransportSettingsReconnect("wss_settings_changed");
+            if (LOGS_ENABLED) DEBUG_D("wss_startup enabled=%d reconnect=%d", wssEnabled ? 1 : 0, transportConnectionOpened ? 1 : 0);
+            // На старте Java включает WSS раньше первого соединения: все они и
+            // так откроются через WSS, а отложенный переподключ через 0,8 с
+            // рвал уже рабочие соединения и удваивал пачку рукопожатий.
+            if (transportConnectionOpened) {
+                requestTransportSettingsReconnect("wss_settings_changed");
+            }
         }
     });
 }
@@ -4340,6 +4360,10 @@ void ConnectionsManager::setNetworkAvailable(bool value, int32_t type, bool slow
     scheduleTask([&, value, type, slow] {
         if (networkAvailable == value && currentNetworkType == type && networkSlow == slow) {
             return;
+        }
+        if (networkAvailable != value || currentNetworkType != type) {
+            // Spare sockets belong to the network they were opened on.
+            wssPool->clear("network_changed");
         }
         networkAvailable = value;
         currentNetworkType = type;

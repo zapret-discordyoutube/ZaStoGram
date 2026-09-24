@@ -234,6 +234,7 @@ add_library(tgnet STATIC
         tgnet/ConnectionSocket.cpp
         tgnet/ConnectionSocketStateMachine.cpp
         tgnet/wss/WssSocket.cpp
+        tgnet/wss/WssPool.cpp
         tgnet/Datacenter.cpp
         tgnet/EventObject.cpp
         tgnet/FileLog.cpp

@@ -11,6 +11,7 @@
 #include "EventObject.h"
 #include "Connection.h"
 #include "Timer.h"
+#include "wss/WssPool.h"
 
 EventObject::EventObject(void *object, EventObjectType type) {
     eventObject = object;
@@ -35,6 +36,13 @@ void EventObject::onEvent(uint32_t events) {
             ssize_t size = 1;
             while (size > 0) {
                 size = read(pipe[0], &ch, 1);
+            }
+            break;
+        }
+        case EventObjectTypeWssPool: {
+            // Retired pool sockets leave an inert object behind for stale events.
+            if (eventObject != nullptr) {
+                tgnet::wss::DispatchPoolEvent(eventObject, events);
             }
             break;
         }
