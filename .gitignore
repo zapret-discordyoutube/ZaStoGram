@@ -17,6 +17,8 @@ TMessagesProj_AppHuawei/afat/
 /mtproxy-logs
 /Tools/__pycache__
 /logs
+# Tester log archives exported from the app (logs.zip, logs (9).zip, ...).
+logs*.zip
 AGENTS.md
 /.codex/skills/
 /skills/
