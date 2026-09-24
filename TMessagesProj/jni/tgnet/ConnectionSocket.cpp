@@ -4709,9 +4709,13 @@ void ConnectionSocket::onEvent(uint32_t events) {
         if (!dispatchWssPayloads(payloads)) {
             return;
         }
+        // Only between packets: cutting a larger answer in the middle would
+        // resend it and cut it again forever. A part too big for the tunnel
+        // freezes instead, and the file loader then asks for smaller parts.
         if (transportAlive
                 && currentWssRoute.tunnel
-                && currentWssTransport->receivedBytes() >= WSS_TUNNEL_ROTATE_BYTES) {
+                && currentWssTransport->receivedBytes() >= WSS_TUNNEL_ROTATE_BYTES
+                && !hasPartialIncomingPacket()) {
             if (LOGS_ENABLED) DEBUG_D("connection(%p) wss_tunnel_rotate rx=%llu", this, (unsigned long long) currentWssTransport->receivedBytes());
             closeSocket(0, 0);
             return;
@@ -5425,7 +5429,11 @@ bool ConnectionSocket::checkTimeout(int64_t now) {
             if (isCurrentWebProxyBridge() && deferWebProxyReceiveTimeout(now)) {
                 return false;
             }
-            if (isCurrentTransportWss() && currentWssTransport != nullptr) {
+            // A tunnel stuck in the middle of an answer larger than it can
+            // carry is not a broken tunnel: the file loader switches to small
+            // parts, and counting it would send the DC to direct TCP instead.
+            if (isCurrentTransportWss() && currentWssTransport != nullptr
+                    && !(currentWssRoute.tunnel && hasPartialIncomingPacket())) {
                 currentWssTransport->timedOut();
             }
             classifyMtProxyPreTcpTimeoutDiagnostic("checkTimeout");

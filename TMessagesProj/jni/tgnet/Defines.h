@@ -163,6 +163,8 @@ typedef struct ConnectiosManagerDelegate {
     virtual void onUpdateConfig(TL_config *config, int32_t instanceNum) = 0;
     virtual void onInternalPushReceived(int32_t instanceNum) = 0;
     virtual void onBytesSent(int32_t amount, int32_t networkType, int32_t instanceNum) = 0;
+    // A media DC switched to the Cloudflare tunnel; file loads should use small parts.
+    virtual void onDatacenterTunneled(int32_t datacenterId, int32_t instanceNum) {}
     virtual void onBytesReceived(int32_t amount, int32_t networkType, int32_t instanceNum) = 0;
     virtual void onRequestNewServerIpAndPort(int32_t second, int32_t instanceNum) = 0;
     virtual void onProxyError(int32_t instanceNum) = 0;

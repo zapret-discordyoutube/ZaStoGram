@@ -52,6 +52,7 @@ protected:
     void onDisconnected(int32_t reason, int32_t error) override;
     void onConnected() override;
     bool hasPendingRequests() override;
+    bool hasPartialIncomingPacket() override;
     std::string proxyConnectionStageOrigin() override;
     std::string proxyConnectionStageSocketRole() override;
     void reconnect();

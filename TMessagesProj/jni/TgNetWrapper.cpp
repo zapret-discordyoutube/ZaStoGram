@@ -47,6 +47,7 @@ jmethodID jclass_ConnectionsManager_onConnectionStateChanged;
 jmethodID jclass_ConnectionsManager_onInternalPushReceived;
 jmethodID jclass_ConnectionsManager_onUpdateConfig;
 jmethodID jclass_ConnectionsManager_onBytesSent;
+jmethodID jclass_ConnectionsManager_onDatacenterTunneled;
 jmethodID jclass_ConnectionsManager_onBytesReceived;
 jmethodID jclass_ConnectionsManager_onRequestNewServerIpAndPort;
 jmethodID jclass_ConnectionsManager_onProxyError;
@@ -534,6 +535,10 @@ class Delegate : public ConnectiosManagerDelegate {
         jniEnv[instanceNum]->CallStaticVoidMethod(jclass_ConnectionsManager, jclass_ConnectionsManager_onBytesSent, amount, networkType, instanceNum);
     }
 
+    void onDatacenterTunneled(int32_t datacenterId, int32_t instanceNum) {
+        jniEnv[instanceNum]->CallStaticVoidMethod(jclass_ConnectionsManager, jclass_ConnectionsManager_onDatacenterTunneled, datacenterId, instanceNum);
+    }
+
     void onRequestNewServerIpAndPort(int32_t second, int32_t instanceNum) {
         jniEnv[instanceNum]->CallStaticVoidMethod(jclass_ConnectionsManager, jclass_ConnectionsManager_onRequestNewServerIpAndPort, second, instanceNum);
     }
@@ -887,6 +892,10 @@ extern "C" int registerNativeTgNetFunctions(JavaVM *vm, JNIEnv *env) {
     }
     jclass_ConnectionsManager_onBytesSent = env->GetStaticMethodID(jclass_ConnectionsManager, "onBytesSent", "(III)V");
     if (jclass_ConnectionsManager_onBytesSent == 0) {
+        return JNI_FALSE;
+    }
+    jclass_ConnectionsManager_onDatacenterTunneled = env->GetStaticMethodID(jclass_ConnectionsManager, "onDatacenterTunneled", "(II)V");
+    if (jclass_ConnectionsManager_onDatacenterTunneled == 0) {
         return JNI_FALSE;
     }
     jclass_ConnectionsManager_onBytesReceived = env->GetStaticMethodID(jclass_ConnectionsManager, "onBytesReceived", "(III)V");

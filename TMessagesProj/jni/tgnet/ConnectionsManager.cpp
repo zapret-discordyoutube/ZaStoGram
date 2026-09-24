@@ -307,6 +307,26 @@ void ConnectionsManager::select() {
     if (now - lastWssPoolTickMs >= 1000) {
         lastWssPoolTickMs = now;
         wssPool->tick(now, wssEnabled && networkAvailable && !networkPaused && proxyAddress.empty() && !testBackend);
+        // Tell Java when a media DC starts going through the tunnel, so file
+        // loads already running for it switch to parts small enough to pass.
+        uint32_t tunneled = 0;
+        if (wssEnabled && proxyAddress.empty()) {
+            for (int32_t dc = 1; dc <= 5; dc++) {
+                if (tgnet::wss::DatacenterTunneled(dc, true, testBackend)) {
+                    tunneled |= 1u << dc;
+                }
+            }
+        }
+        const uint32_t appeared = tunneled & ~tunneledMediaDatacenters;
+        tunneledMediaDatacenters = tunneled;
+        if (appeared != 0 && delegate != nullptr) {
+            for (int32_t dc = 1; dc <= 5; dc++) {
+                if (appeared & (1u << dc)) {
+                    if (LOGS_ENABLED) DEBUG_D("wss_route media_dc_tunneled dc=%d account%u", dc, instanceNum);
+                    delegate->onDatacenterTunneled(dc, instanceNum);
+                }
+            }
+        }
     }
 
     Datacenter *datacenter = getDatacenterWithId(currentDatacenterId);

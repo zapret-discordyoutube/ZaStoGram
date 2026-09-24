@@ -987,6 +987,10 @@ void Connection::onConnected() {
     ConnectionsManager::getInstance(currentDatacenter->instanceNum).onConnectionConnected(this);
 }
 
+bool Connection::hasPartialIncomingPacket() {
+    return restOfTheData != nullptr || lastPacketLength != 0;
+}
+
 bool Connection::hasPendingRequests() {
     return ConnectionsManager::getInstance(currentDatacenter->instanceNum).hasPendingRequestsForConnection(this);
 }

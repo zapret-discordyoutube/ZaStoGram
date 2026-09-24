@@ -201,6 +201,7 @@ private:
     int64_t lastProbeReapMs = 0;
     std::unique_ptr<tgnet::wss::Pool> wssPool;
     int64_t lastWssPoolTickMs = 0;
+    uint32_t tunneledMediaDatacenters = 0;
     std::unique_ptr<tgnet::wss::Socket> takePooledWssSocket(const tgnet::wss::Route &route);
     int32_t nextPingTimeOffset = 60000 * 3;
     int64_t sendingPushPingTime = 0;

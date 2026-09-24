@@ -913,6 +913,27 @@ public class FileLoadOperation {
         notLoadedBytesRangesCopy = new ArrayList<>(notLoadedBytesRanges);
     }
 
+    public void onDatacenterTunneled(int dc) {
+        Utilities.stageQueue.postRunnable(() -> {
+            if (state != stateDownloading || isCdn || isPreloadVideoOperation || datacenterId != dc
+                    || currentDownloadChunkSize <= TUNNEL_DOWNLOAD_CHUNK_SIZE) {
+                return;
+            }
+            // Parts already requested are larger than a tunnel connection can
+            // carry and would never arrive: drop them and continue from what
+            // is already downloaded in 8 KB parts.
+            if (!requestInfos.isEmpty() || !delayedRequestInfos.isEmpty()) {
+                clearOperation(null, false, false);
+            }
+            currentDownloadChunkSize = TUNNEL_DOWNLOAD_CHUNK_SIZE;
+            currentMaxDownloadRequests = 1;
+            if (BuildVars.LOGS_ENABLED) {
+                FileLog.d("debug_loading: " + fileName + " dc=" + dc + " switched to tunnel, 8 KB parts from " + downloadedBytes);
+            }
+            startDownloadRequest(-1);
+        });
+    }
+
     public void pause() {
         if (state != stateDownloading) {
             return;

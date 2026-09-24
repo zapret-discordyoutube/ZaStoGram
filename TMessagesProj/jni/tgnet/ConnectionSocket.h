@@ -79,6 +79,8 @@ protected:
     virtual void onDisconnected(int32_t reason, int32_t error) = 0;
     virtual void onConnected() = 0;
     virtual bool hasPendingRequests() = 0;
+    // An incoming MTProto packet is only partly received.
+    virtual bool hasPartialIncomingPacket() { return false; }
 
     std::string overrideProxyUser = "";
     std::string overrideProxyPassword = "";

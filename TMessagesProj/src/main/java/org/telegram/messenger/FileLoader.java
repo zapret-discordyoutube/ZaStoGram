@@ -446,6 +446,14 @@ public class FileLoader extends BaseController {
         });
     }
 
+    // ZaStoGram: a media DC went to the Cloudflare tunnel; running loads for it
+    // switch to parts small enough to get through a throttled network.
+    public void onDatacenterTunneled(final int datacenterId) {
+        for (ConcurrentHashMap.Entry<String, FileLoadOperation> entry : loadOperationPaths.entrySet()) {
+            entry.getValue().onDatacenterTunneled(datacenterId);
+        }
+    }
+
     public void onNetworkChanged(final boolean slow) {
         fileLoaderQueue.postRunnable(() -> {
             for (ConcurrentHashMap.Entry<String, FileUploadOperation> entry : uploadOperationPaths.entrySet()) {

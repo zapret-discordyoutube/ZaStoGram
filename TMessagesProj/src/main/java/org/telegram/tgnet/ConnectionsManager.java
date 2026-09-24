@@ -1391,6 +1391,14 @@ public class ConnectionsManager extends BaseController {
         return flags;
     }
 
+    public static void onDatacenterTunneled(final int datacenterId, final int currentAccount) {
+        try {
+            FileLoader.getInstance(currentAccount).onDatacenterTunneled(datacenterId);
+        } catch (Exception e) {
+            FileLog.e(e);
+        }
+    }
+
     public static void onBytesSent(int amount, int networkType, final int currentAccount) {
         try {
             AccountInstance.getInstance(currentAccount).getStatsController().incrementSentBytesCount(networkType, StatsController.TYPE_TOTAL, amount);
