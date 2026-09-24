@@ -584,11 +584,13 @@ bool Socket::flushPending(std::string *diagnostic) {
                     output.data() + pendingOutputOffset,
                     static_cast<int>(output.size() - pendingOutputOffset));
             if (result > 0) {
+                writeBlockedOnRead = false;
                 pendingOutputOffset += static_cast<size_t>(result);
                 continue;
             }
             const int error = SSL_get_error(ssl, result);
             if (error == SSL_ERROR_WANT_READ) {
+                writeBlockedOnRead = true;
                 setIoWait(IoWait::Read, "write");
                 return true;
             }
@@ -602,6 +604,7 @@ bool Socket::flushPending(std::string *diagnostic) {
         pendingOutputBytes -= output.size();
         pendingOutput.pop_front();
         pendingOutputOffset = 0;
+        writeBlockedOnRead = false;
         setIoWait(IoWait::None, "write_complete");
         if (state == State::HttpWrite) {
             state = State::HttpRead;
@@ -846,14 +849,24 @@ bool Socket::isReady() const {
     return state == State::Ready;
 }
 
+bool Socket::writesWaitForRead() const {
+    // SSL_read ends every drained read with WANT_READ, which only means "no
+    // more input yet"; EPOLLIN stays armed for that. Treating it as a block on
+    // writing parked every outgoing frame until the server sent something
+    // else (2.1 s for a msgs_ack in logs (9)), which throttled uploads.
+    // Writes wait for input only when SSL_write itself asked for it, or while
+    // the TLS handshake is still reading.
+    return writeBlockedOnRead || (state == State::TlsHandshake && ioWait == IoWait::Read);
+}
+
 bool Socket::wantsWrite() const {
     return state == State::TcpConnecting
             || ioWait == IoWait::Write
-            || (!pendingOutput.empty() && ioWait != IoWait::Read);
+            || (!pendingOutput.empty() && !writesWaitForRead());
 }
 
 bool Socket::canWriteApplicationData() const {
-    return state == State::Ready && ioWait != IoWait::Read;
+    return state == State::Ready && !writesWaitForRead();
 }
 
 bool Socket::isClosed() const {
@@ -985,6 +998,7 @@ void Socket::close() {
     state = State::Closed;
     phase = transport::HandshakePhase::None;
     ioWait = IoWait::None;
+    writeBlockedOnRead = false;
     pendingOutput.clear();
     pendingOutputOffset = 0;
     pendingOutputBytes = 0;

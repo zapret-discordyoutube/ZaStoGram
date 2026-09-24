@@ -92,6 +92,7 @@ private:
     bool parseFrames(std::vector<std::vector<uint8_t>> &payloads, std::string *diagnostic);
     bool queueFrame(uint8_t opcode, const uint8_t *data, uint32_t size, std::string *diagnostic);
     void setIoWait(IoWait wait, const char *operation);
+    bool writesWaitForRead() const;
     void noteAttemptFailed();
     void noteUpgradeSucceeded();
     const char *stateName() const;
@@ -122,6 +123,8 @@ private:
     bool fragmentedMessage = false;
     bool failureRecorded = false;
     bool speculative = false;
+    // SSL_write returned WANT_READ: the record can only continue after input.
+    bool writeBlockedOnRead = false;
 };
 
 std::unique_ptr<transport::Socket> CreateSocket(Route route);
