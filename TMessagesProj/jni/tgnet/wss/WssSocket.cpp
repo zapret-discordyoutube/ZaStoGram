@@ -140,6 +140,9 @@ bool routeSuppressed(const std::string &domain) {
     if (it->second.suppressedUntil <= monotonicMillis()) {
         it->second.suppressedUntil = 0;
         it->second.consecutiveFailures = 0;
+        if (LOGS_ENABLED) {
+            DEBUG_D("wss_route restored domain=%s reason=expired", domain.c_str());
+        }
         return false;
     }
     return true;
@@ -162,14 +165,26 @@ void recordRouteUnreachable(const Route &route) {
     // в logs (10) все сессии DC1 и DC5 через туннель умерли, а kws2-1 и kws4-1
     // отдали мегабайты. Медиа теперь подчиняется тем же правилам, что и
     // основной релей.
-    if (++health.consecutiveFailures >= kRouteFailuresBeforeSuppress) {
+    ++health.consecutiveFailures;
+    if (LOGS_ENABLED) {
+        DEBUG_D("wss_route failure domain=%s failures=%u/%u", route.domain.c_str(),
+                health.consecutiveFailures, kRouteFailuresBeforeSuppress);
+    }
+    if (health.consecutiveFailures >= kRouteFailuresBeforeSuppress) {
         health.suppressedUntil = now + kRouteSuppressTtlMs;
+        if (LOGS_ENABLED) {
+            DEBUG_D("wss_route suppressed domain=%s for_ms=%lld next=%s", route.domain.c_str(),
+                    (long long) kRouteSuppressTtlMs, route.tunnel ? "direct" : "tunnel");
+        }
     }
 }
 
 void recordRouteReachable(const Route &route) {
     std::lock_guard<std::mutex> lock(relayPreferencesMutex);
     RouteHealth &health = routeHealth[route.domain];
+    if (LOGS_ENABLED && (health.consecutiveFailures != 0 || health.suppressedUntil != 0)) {
+        DEBUG_D("wss_route restored domain=%s reason=data", route.domain.c_str());
+    }
     health.consecutiveFailures = 0;
     health.suppressedUntil = 0;
     health.lastFailureAt = 0;
@@ -380,6 +395,7 @@ bool Socket::open(const struct sockaddr *address, socklen_t addressLength, std::
     phase = transport::HandshakePhase::None;
     failureRecorded = false;
     openedAtMs = monotonicMillis();
+    summaryTaken = false;
     readyAtMs = 0;
     firstDataAtMs = 0;
     bytesOut = 0;
@@ -1013,22 +1029,33 @@ const char *Socket::ioWaitName() const {
     return "unknown";
 }
 
+std::string Socket::takeSessionSummary() {
+    if (socketFd < 0 || openedAtMs == 0) {
+        return std::string();
+    }
+    summaryTaken = true;
+    // One line per relay socket answers what used to take a script over the
+    // whole log: which route it took, how far the handshake got, how much
+    // went each way and how long it lived.
+    char buffer[512];
+    snprintf(buffer, sizeof(buffer),
+            "domain=%s relay=%s route=%s pool=%s tx=%llu rx=%llu ready_ms=%lld first_data_ms=%lld life_ms=%lld",
+            routeConfig.domain.c_str(),
+            routeConfig.connectHost.c_str(),
+            routeConfig.tunnel ? "tunnel" : (routeConfig.viaFallback ? "dns" : "ip"),
+            speculative ? "spare" : (fromPool ? "hit" : "no"),
+            (unsigned long long) bytesOut,
+            (unsigned long long) bytesIn,
+            (long long) (readyAtMs != 0 ? readyAtMs - openedAtMs : -1),
+            (long long) (firstDataAtMs != 0 ? firstDataAtMs - openedAtMs : -1),
+            (long long) (monotonicMillis() - openedAtMs));
+    return buffer;
+}
+
 void Socket::close() {
-    if (socketFd >= 0 && LOGS_ENABLED) {
-        // One line per relay socket answers what used to take a script over
-        // the whole log: which route it took, how far the handshake got, how
-        // much went each way and how long it lived.
-        const int64_t now = monotonicMillis();
-        DEBUG_D("wss_session domain=%s relay=%s route=%s pool=%s tx=%llu rx=%llu ready_ms=%lld first_data_ms=%lld life_ms=%lld",
-                routeConfig.domain.c_str(),
-                routeConfig.connectHost.c_str(),
-                routeConfig.tunnel ? "tunnel" : (routeConfig.viaFallback ? "dns" : "ip"),
-                speculative ? "spare" : (fromPool ? "hit" : "no"),
-                (unsigned long long) bytesOut,
-                (unsigned long long) bytesIn,
-                (long long) (readyAtMs != 0 ? readyAtMs - openedAtMs : -1),
-                (long long) (firstDataAtMs != 0 ? firstDataAtMs - openedAtMs : -1),
-                (long long) (now - openedAtMs));
+    if (socketFd >= 0 && !summaryTaken && LOGS_ENABLED) {
+        // Pool spares and sockets dropped without a disconnect line.
+        DEBUG_D("wss_session %s", takeSessionSummary().c_str());
     }
     if (ssl != nullptr) {
         SSL_free(ssl);

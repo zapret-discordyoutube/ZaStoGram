@@ -58,6 +58,7 @@ public:
     const char *transportName() const override;
     void timedOut() override;
     void noteAppDataTimeout() override;
+    std::string takeSessionSummary() override;
     void close() override;
 
     const Route &route() const;
@@ -130,6 +131,7 @@ private:
     int64_t firstDataAtMs = 0;
     uint64_t bytesOut = 0;
     uint64_t bytesIn = 0;
+    bool summaryTaken = false;
     // SSL_write returned WANT_READ: the record can only continue after input.
     bool writeBlockedOnRead = false;
 };

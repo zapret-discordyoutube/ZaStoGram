@@ -4572,7 +4572,8 @@ void ConnectionSocket::closeStepLogDisconnect(int32_t reason, int32_t error, con
     }
     if (currentTransportWss) {
         if (LOGS_ENABLED) {
-            DEBUG_D("connection(%p) wss_disconnect reason=%d reason_text=%s error=%d error_text=%s phase=%s transport_state=%s epoll_registered=%d", this, reason, mtProxyDisconnectReasonName(reason), error, mtProxySocketErrorName(error), proxyCheckDiagnostic.c_str(), transportStateName(currentTransportState), epollRegistered ? 1 : 0);
+            const std::string session = currentWssTransport != nullptr ? currentWssTransport->takeSessionSummary() : std::string();
+            DEBUG_D("connection(%p) wss_disconnect account%d dc%d media=%d reason=%d reason_text=%s error=%d error_text=%s phase=%s transport_state=%s epoll_registered=%d %s", this, (int) instanceNum, (int) currentDatacenterId, currentMediaConnection ? 1 : 0, reason, mtProxyDisconnectReasonName(reason), error, mtProxySocketErrorName(error), proxyCheckDiagnostic.c_str(), transportStateName(currentTransportState), epollRegistered ? 1 : 0, session.c_str());
         }
         return;
     }
