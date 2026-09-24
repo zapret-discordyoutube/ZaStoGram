@@ -4241,6 +4241,12 @@ std::string ConnectionsManager::getProxyActivationOrigin() {
     return proxyActivationOrigin;
 }
 
+bool ConnectionsManager::isDatacenterTunneled(uint32_t datacenterId, bool media) {
+    // Called from Java threads: route health has its own lock, and a stale
+    // wssEnabled only costs one download its large parts.
+    return wssEnabled && tgnet::wss::DatacenterTunneled((int32_t) datacenterId, media, testBackend);
+}
+
 void ConnectionsManager::setWssTransportEnabled(bool enabled) {
     scheduleTask([&, enabled] {
         if (wssEnabled != enabled) {

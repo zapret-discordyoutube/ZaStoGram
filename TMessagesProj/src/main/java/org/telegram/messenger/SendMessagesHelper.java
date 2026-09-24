@@ -11238,7 +11238,9 @@ public class SendMessagesHelper extends BaseController implements NotificationCe
                         if (forceDocument) {
                             videoEditedInfo = null;
                         } else {
-                            videoEditedInfo = info.videoEditedInfo != null ? info.videoEditedInfo : createCompressionSettings(info.path, info.livePhotoVideoOffset);
+                            videoEditedInfo = info.isLivePhoto
+                                    ? (info.videoEditedInfo != null ? info.videoEditedInfo : createCompressionSettings(info.path, info.livePhotoVideoOffset))
+                                    : ZaStoVideoCompression.apply(info.path, info.videoEditedInfo != null ? info.videoEditedInfo : createCompressionSettings(info.path, info.livePhotoVideoOffset));
                         }
 
                         if (!forceDocument && (videoEditedInfo != null || info.path.endsWith("mp4")) || info.isLivePhoto) {
@@ -12085,7 +12087,7 @@ public class SendMessagesHelper extends BaseController implements NotificationCe
             return;
         }
         new Thread(() -> {
-            final VideoEditedInfo videoEditedInfo = info != null ? info : createCompressionSettings(videoPath, 0);
+            final VideoEditedInfo videoEditedInfo = ZaStoVideoCompression.apply(videoPath, info != null ? info : createCompressionSettings(videoPath, 0));
 
             boolean isEncrypted = DialogObject.isEncryptedDialog(dialogId);
 

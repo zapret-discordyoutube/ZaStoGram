@@ -204,6 +204,11 @@ static constexpr int64_t WSS_MEDIA_APPDATA_NO_RESPONSE_TIMEOUT_MS = 20000;
 static constexpr int64_t WSS_HANDSHAKE_TIMEOUT_MS = 8000;
 // Провайдер глотает SYN целого потока, повторы по нему бесполезны: новый сокет проходит.
 static constexpr int64_t WSS_TCP_CONNECT_TIMEOUT_MS = 2500;
+// A throttled network freezes each TCP connection to Cloudflare after about
+// 16 KB downstream. A tunnel connection is replaced once it has received this
+// much, so that one more answer (downloads over the tunnel ask for 8 KB parts)
+// still fits under the freeze.
+static constexpr uint64_t WSS_TUNNEL_ROTATE_BYTES = 6 * 1024;
 static constexpr int64_t MT_PROXY_EARLY_APPDATA_DROP_MS = 2 * 60 * 1000;
 
 // WEB proxy receive-wait reasons by WebProxyFlow.REASON_* value; the numbers
@@ -4702,6 +4707,13 @@ void ConnectionSocket::onEvent(uint32_t events) {
         // and MTProto needs it to recover (e.g. regenerate an auth key on -404)
         // instead of blindly reconnecting with the same state.
         if (!dispatchWssPayloads(payloads)) {
+            return;
+        }
+        if (transportAlive
+                && currentWssRoute.tunnel
+                && currentWssTransport->receivedBytes() >= WSS_TUNNEL_ROTATE_BYTES) {
+            if (LOGS_ENABLED) DEBUG_D("connection(%p) wss_tunnel_rotate rx=%llu", this, (unsigned long long) currentWssTransport->receivedBytes());
+            closeSocket(0, 0);
             return;
         }
         if (!transportAlive) {

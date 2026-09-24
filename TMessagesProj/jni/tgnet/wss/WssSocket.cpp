@@ -355,6 +355,12 @@ bool OfficialRoute(int32_t dcId, bool mediaConnection, bool testBackend, const s
     return true;
 }
 
+bool DatacenterTunneled(int32_t dcId, bool mediaConnection, bool testBackend) {
+    Route route;
+    // The address only fills the tunnel's ?dst=; any Telegram IPv4 will do.
+    return OfficialRoute(dcId, mediaConnection, testBackend, "149.154.175.50", &route) && route.tunnel;
+}
+
 bool RouteUsable(const Route &route) {
     return !routeSuppressed(route.domain) && preferFallback(route) == route.viaFallback;
 }
@@ -1035,6 +1041,10 @@ const char *Socket::ioWaitName() const {
             return "write";
     }
     return "unknown";
+}
+
+uint64_t Socket::receivedBytes() const {
+    return bytesIn;
 }
 
 std::string Socket::takeSessionSummary() {

@@ -150,6 +150,7 @@ public class FileLoadOperation {
     private final static int stateCanceled = 4;
     private final static int stateCancelling = 5;
 
+    private static final int TUNNEL_DOWNLOAD_CHUNK_SIZE = 1024 * 8;
     private int downloadChunkSize = 1024 * 32;
     private int downloadChunkSizeBig = 1024 * 128;
     private int cdnChunkCheckSize = 1024 * 128;
@@ -955,6 +956,17 @@ public class FileLoadOperation {
                 boolean bigChunk = totalBytesCount >= bigFileSizeFrom;
                 currentDownloadChunkSize = bigChunk ? downloadChunkSizeBig : downloadChunkSize;
                 currentMaxDownloadRequests = bigChunk ? maxDownloadRequestsBig : maxDownloadRequests;
+            }
+            // ZaStoGram: when this DC's relay is blocked and its media goes
+            // through the Cloudflare tunnel, a throttled network freezes each
+            // TCP connection after ~16 KB. Ask for 8 KB parts one at a time;
+            // the native layer replaces the tunnel connection before the limit.
+            if (!isCdn && datacenterId > 0 && ConnectionsManager.native_isDatacenterTunneled(currentAccount, datacenterId, true)) {
+                currentDownloadChunkSize = TUNNEL_DOWNLOAD_CHUNK_SIZE;
+                currentMaxDownloadRequests = 1;
+                if (BuildVars.LOGS_ENABLED) {
+                    FileLog.d("debug_loading: " + fileName + " dc=" + datacenterId + " via tunnel, 8 KB parts");
+                }
             }
         }
         final boolean alreadyStarted = state != stateIdle;

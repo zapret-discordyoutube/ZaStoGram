@@ -40,6 +40,9 @@ bool OfficialRoute(int32_t dcId, bool mediaConnection, bool testBackend, const s
 // and not switched to the relay's DNS name.
 bool RouteUsable(const Route &route);
 
+// Whether OfficialRoute would carry this DC through the Cloudflare tunnel now.
+bool DatacenterTunneled(int32_t dcId, bool mediaConnection, bool testBackend);
+
 class Socket final : public transport::Socket {
 public:
     explicit Socket(Route route);
@@ -59,6 +62,7 @@ public:
     void timedOut() override;
     void noteAppDataTimeout() override;
     std::string takeSessionSummary() override;
+    uint64_t receivedBytes() const override;
     void close() override;
 
     const Route &route() const;

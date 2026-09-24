@@ -86,6 +86,7 @@ public:
     uint32_t getProxyConfigGeneration();
     std::string getProxyActivationOrigin();
     void setWssTransportEnabled(bool enabled);
+    bool isDatacenterTunneled(uint32_t datacenterId, bool media);
     void setLangCode(std::string langCode);
     void setRegId(std::string regId);
     void setSystemLangCode(std::string langCode);

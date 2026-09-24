@@ -49,6 +49,8 @@ public:
     // (route, bytes each way, handshake and first-data times). Taking it
     // tells the transport not to log the same summary again on close.
     virtual std::string takeSessionSummary() { return std::string(); }
+    // Application bytes received since open; the WSS tunnel rotates on it.
+    virtual uint64_t receivedBytes() const { return 0; }
     virtual void close() = 0;
 };
 

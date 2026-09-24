@@ -8,16 +8,20 @@ import android.widget.FrameLayout;
 import androidx.recyclerview.widget.LinearLayoutManager;
 import androidx.recyclerview.widget.RecyclerView;
 
+import org.telegram.messenger.LocaleController;
 import org.telegram.messenger.NotificationCenter;
 import org.telegram.messenger.R;
 import org.telegram.messenger.UserConfig;
 import org.telegram.messenger.ZaStoPrivacy;
+import org.telegram.messenger.ZaStoVideoCompression;
 import org.telegram.ui.ActionBar.ActionBar;
+import org.telegram.ui.ActionBar.AlertDialog;
 import org.telegram.ui.ActionBar.BaseFragment;
 import org.telegram.ui.ActionBar.Theme;
 import org.telegram.ui.Cells.HeaderCell;
 import org.telegram.ui.Cells.TextCheckCell;
 import org.telegram.ui.Cells.TextInfoPrivacyCell;
+import org.telegram.ui.Cells.TextSettingsCell;
 import org.telegram.ui.Components.LayoutHelper;
 import org.telegram.ui.Components.RecyclerListView;
 
@@ -30,6 +34,7 @@ public class ZaStoPrivacySettingsActivity extends BaseFragment {
     private static final int VIEW_TYPE_CHECK = 0;
     private static final int VIEW_TYPE_HEADER = 1;
     private static final int VIEW_TYPE_INFO = 2;
+    private static final int VIEW_TYPE_VALUE = 3;
 
     private RecyclerListView listView;
 
@@ -42,6 +47,7 @@ public class ZaStoPrivacySettingsActivity extends BaseFragment {
     private int muteScreenshotRow;
     private int disableAdsRow;
     private int zastogramPromoRow;
+    private int videoNoRecompressRow;
     private int infoRow;
     private int rowCount;
 
@@ -58,6 +64,7 @@ public class ZaStoPrivacySettingsActivity extends BaseFragment {
         muteScreenshotRow = rowCount++;
         disableAdsRow = rowCount++;
         zastogramPromoRow = rowCount++;
+        videoNoRecompressRow = rowCount++;
         infoRow = rowCount++;
         return true;
     }
@@ -87,6 +94,10 @@ public class ZaStoPrivacySettingsActivity extends BaseFragment {
         frameLayout.addView(listView, LayoutHelper.createFrame(LayoutHelper.MATCH_PARENT, LayoutHelper.MATCH_PARENT));
 
         listView.setOnItemClickListener((view, position) -> {
+            if (position == videoNoRecompressRow) {
+                showVideoLimitPicker();
+                return;
+            }
             if (!(view instanceof TextCheckCell)) {
                 return;
             }
@@ -107,6 +118,27 @@ public class ZaStoPrivacySettingsActivity extends BaseFragment {
         });
 
         return fragmentView;
+    }
+
+    private void showVideoLimitPicker() {
+        if (getParentActivity() == null) {
+            return;
+        }
+        final int[] choices = ZaStoVideoCompression.LIMIT_CHOICES_MB;
+        final CharSequence[] items = new CharSequence[choices.length];
+        for (int a = 0; a < choices.length; a++) {
+            items[a] = choices[a] == 0 ? "Выкл (всегда пережимать)" : "Видео до " + choices[a] + " МБ";
+        }
+        AlertDialog.Builder builder = new AlertDialog.Builder(getParentActivity());
+        builder.setTitle("Видео без пережатия");
+        builder.setItems(items, (dialog, which) -> {
+            ZaStoVideoCompression.setLimitMb(choices[which]);
+            if (listView != null && listView.getAdapter() != null) {
+                listView.getAdapter().notifyItemChanged(videoNoRecompressRow);
+            }
+        });
+        builder.setNegativeButton(LocaleController.getString(R.string.Cancel), null);
+        showDialog(builder.create());
     }
 
     private String keyForRow(int position) {
@@ -148,7 +180,7 @@ public class ZaStoPrivacySettingsActivity extends BaseFragment {
 
         @Override
         public boolean isEnabled(RecyclerView.ViewHolder holder) {
-            return holder.getItemViewType() == VIEW_TYPE_CHECK;
+            return holder.getItemViewType() == VIEW_TYPE_CHECK || holder.getItemViewType() == VIEW_TYPE_VALUE;
         }
 
         @Override
@@ -157,6 +189,8 @@ public class ZaStoPrivacySettingsActivity extends BaseFragment {
                 return VIEW_TYPE_HEADER;
             } else if (position == infoRow) {
                 return VIEW_TYPE_INFO;
+            } else if (position == videoNoRecompressRow) {
+                return VIEW_TYPE_VALUE;
             }
             return VIEW_TYPE_CHECK;
         }
@@ -169,6 +203,9 @@ public class ZaStoPrivacySettingsActivity extends BaseFragment {
                 view.setBackgroundColor(Theme.getColor(Theme.key_windowBackgroundWhite));
             } else if (viewType == VIEW_TYPE_INFO) {
                 view = new TextInfoPrivacyCell(mContext);
+            } else if (viewType == VIEW_TYPE_VALUE) {
+                view = new TextSettingsCell(mContext);
+                view.setBackgroundColor(Theme.getColor(Theme.key_windowBackgroundWhite));
             } else {
                 view = new TextCheckCell(mContext);
                 view.setBackgroundColor(Theme.getColor(Theme.key_windowBackgroundWhite));
@@ -184,12 +221,15 @@ public class ZaStoPrivacySettingsActivity extends BaseFragment {
                     ((HeaderCell) holder.itemView).setText("Функции приватности ZaSto");
                     break;
                 case VIEW_TYPE_INFO:
-                    ((TextInfoPrivacyCell) holder.itemView).setText("По умолчанию всё включено. Выключение тумблера отменяет соответствующую функцию ZaSto. Без закрепления канал ZaStoGram становится обычным чатом: его можно убрать в архив.");
+                    ((TextInfoPrivacyCell) holder.itemView).setText("По умолчанию всё включено. Выключение тумблера отменяет соответствующую функцию ZaSto. Без закрепления канал ZaStoGram становится обычным чатом: его можно убрать в архив. Видео без пережатия уходит оригиналом, как с компьютера: быстрее, но больше по объёму; видео с обрезкой, рисованием или фильтрами пережимается всегда.");
+                    break;
+                case VIEW_TYPE_VALUE:
+                    ((TextSettingsCell) holder.itemView).setTextAndValue("Видео без пережатия", ZaStoVideoCompression.describe(ZaStoVideoCompression.getLimitMb()), false);
                     break;
                 default:
                     TextCheckCell cell = (TextCheckCell) holder.itemView;
                     String key = keyForRow(position);
-                    boolean last = position == zastogramPromoRow;
+                    boolean last = false;
                     cell.setTextAndCheck(labelForRow(position), key != null && ZaStoPrivacy.get(key), !last);
                     break;
             }

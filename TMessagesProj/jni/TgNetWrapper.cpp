@@ -345,6 +345,10 @@ void setProxyActivationContext(JNIEnv *env, jclass c, jint instanceNum, jint act
     }
 }
 
+jboolean isDatacenterTunneled(JNIEnv *env, jclass c, jint instanceNum, jint datacenterId, jboolean media) {
+    return ConnectionsManager::getInstance(instanceNum).isDatacenterTunneled((uint32_t) datacenterId, media != 0) ? JNI_TRUE : JNI_FALSE;
+}
+
 void setWssTransportEnabled(JNIEnv *env, jclass c, jint instanceNum, jboolean enabled) {
     ConnectionsManager::getInstance(instanceNum).setWssTransportEnabled(enabled != 0);
 }
@@ -719,6 +723,7 @@ static JNINativeMethod ConnectionsManagerMethods[] = {
         {"native_applyDatacenterAddress", "(IILjava/lang/String;I)V", (void *) applyDatacenterAddress},
         {"native_setProxySettings", "(ILjava/lang/String;ILjava/lang/String;Ljava/lang/String;Ljava/lang/String;Lorg/telegram/tgnet/MtProxyOptions;ILjava/lang/String;)V", (void *) setProxySettings},
         {"native_setWssTransportEnabled", "(IZ)V", (void *) setWssTransportEnabled},
+        {"native_isDatacenterTunneled", "(IIZ)Z", (void *) isDatacenterTunneled},
         {"native_getConnectionState", "(I)I", (void *) getConnectionState},
         {"native_setUserId", "(IJ)V", (void *) setUserId},
         {"native_init", "(IIIILjava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;IJZZZII)V", (void *) init},
