@@ -3481,6 +3481,9 @@ void ConnectionSocket::openConnection(std::string address, uint16_t port, std::s
             address,
             &selectedWssRoute);
 
+    if (!shouldUseWss && manager.wssEnabled && overrideProxyAddress.empty() && proxyAddress->empty() && LOGS_ENABLED) {
+        DEBUG_D("connection(%p) wss_startup direct dc%d media=%d target=%s:%u reason=no_usable_wss_route", this, (int) datacenterId, mediaConnection ? 1 : 0, address.c_str(), (unsigned int) port);
+    }
     if (shouldUseWss && manager.getIpStratagy() == USE_IPV6_ONLY
             && !selectedWssRoute.relayHostFallback.empty()) {
         // У устройства нет IPv4 вообще, а зашитые адреса релеев — только IPv4.
