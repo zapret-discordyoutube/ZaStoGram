@@ -132,6 +132,7 @@ private:
     uint64_t bytesOut = 0;
     uint64_t bytesIn = 0;
     bool summaryTaken = false;
+    bool reachableRecorded = false;
     // SSL_write returned WANT_READ: the record can only continue after input.
     bool writeBlockedOnRead = false;
 };

@@ -396,6 +396,7 @@ bool Socket::open(const struct sockaddr *address, socklen_t addressLength, std::
     failureRecorded = false;
     openedAtMs = monotonicMillis();
     summaryTaken = false;
+    reachableRecorded = false;
     readyAtMs = 0;
     firstDataAtMs = 0;
     bytesOut = 0;
@@ -787,8 +788,15 @@ bool Socket::parseFrames(std::vector<std::vector<uint8_t>> &payloads, std::strin
     if (!payloads.empty() && phase == transport::HandshakePhase::WebSocketReady) {
         phase = transport::HandshakePhase::FirstDataReceived;
         firstDataAtMs = monotonicMillis();
-        // Только реальные MTProto-данные доказывают, что релей жив: успешный
-        // upgrade проходит и у релеев, которые дальше молча глотают трафик.
+    }
+    // Только реальные MTProto-данные доказывают, что релей жив: успешный
+    // upgrade проходит и у релеев, которые дальше молча глотают трафик. Туннель
+    // Cloudflare на мобильной сети отдаёт первые килобайты и замерзает, поэтому
+    // его доказательство — объём больше порога заморозки, иначе первый же
+    // ответ сбрасывал счётчик заморозок и туннель не отключался никогда.
+    if (!reachableRecorded && phase == transport::HandshakePhase::FirstDataReceived
+            && (!routeConfig.tunnel || bytesIn >= kTunnelFreezeBytes)) {
+        reachableRecorded = true;
         recordRouteReachable(routeConfig);
     }
     return true;
