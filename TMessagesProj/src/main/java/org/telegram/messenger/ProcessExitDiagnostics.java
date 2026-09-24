@@ -13,6 +13,12 @@ import android.content.SharedPreferences;
 import android.os.Build;
 import android.text.TextUtils;
 
+import java.io.File;
+import java.io.FileInputStream;
+import java.io.FileOutputStream;
+import java.io.PrintWriter;
+import java.io.StringWriter;
+import java.nio.charset.StandardCharsets;
 import java.util.List;
 
 /** Records Android's reason for the previous process death in the next session log. */
@@ -21,7 +27,68 @@ public final class ProcessExitDiagnostics {
     private static final String PREFS_NAME = "runtime_exit_diagnostics";
     private static final String LAST_REPORTED_PREFIX = "last_reported_";
 
+    // Android records only "java_crash" for a Java crash, and the stack sent
+    // to the session log often never reaches the file: the process dies with
+    // the async writer mid-line (logs (7): the last line cut in half, no
+    // stack). The handler below writes the stack synchronously to its own
+    // small file, and the next session prints it next to previous_process_exit.
+    private static final String CRASH_FILE = "zasto_last_crash.txt";
+    private static final int MAX_CRASH_BYTES = 32 * 1024;
+    private static volatile boolean crashRecorderInstalled;
+
     private ProcessExitDiagnostics() {
+    }
+
+    public static void installCrashRecorder(Context context) {
+        if (crashRecorderInstalled || context == null) {
+            return;
+        }
+        crashRecorderInstalled = true;
+        final File file = new File(context.getFilesDir(), CRASH_FILE);
+        final Thread.UncaughtExceptionHandler previous = Thread.getDefaultUncaughtExceptionHandler();
+        Thread.setDefaultUncaughtExceptionHandler((thread, exception) -> {
+            try {
+                StringWriter text = new StringWriter();
+                PrintWriter writer = new PrintWriter(text);
+                writer.println("time_ms=" + System.currentTimeMillis() + " thread=" + (thread != null ? thread.getName() : "null"));
+                exception.printStackTrace(writer);
+                writer.flush();
+                byte[] bytes = text.toString().getBytes(StandardCharsets.UTF_8);
+                try (FileOutputStream out = new FileOutputStream(file, false)) {
+                    out.write(bytes, 0, Math.min(bytes.length, MAX_CRASH_BYTES));
+                    out.getFD().sync();
+                }
+            } catch (Throwable ignore) {
+            }
+            if (previous != null) {
+                previous.uncaughtException(thread, exception);
+            }
+        });
+    }
+
+    public static void logPreviousCrashStack(Context context) {
+        if (!BuildVars.LOGS_ENABLED || context == null) {
+            return;
+        }
+        File file = new File(context.getFilesDir(), CRASH_FILE);
+        if (!file.exists()) {
+            return;
+        }
+        try (FileInputStream in = new FileInputStream(file)) {
+            byte[] bytes = new byte[(int) Math.min(file.length(), MAX_CRASH_BYTES)];
+            int read = 0;
+            while (read < bytes.length) {
+                int count = in.read(bytes, read, bytes.length - read);
+                if (count <= 0) {
+                    break;
+                }
+                read += count;
+            }
+            FileLog.persistDiagnostic("previous_crash_stack " + new String(bytes, 0, read, StandardCharsets.UTF_8));
+        } catch (Throwable t) {
+            FileLog.e("previous_crash_stack unavailable", t);
+        }
+        file.delete();
     }
 
     public static void logPreviousExit(Context context) {

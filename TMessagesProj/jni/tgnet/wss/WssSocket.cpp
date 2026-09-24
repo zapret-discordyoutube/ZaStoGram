@@ -173,9 +173,8 @@ void recordRouteUnreachable(const Route &route) {
     if (health.consecutiveFailures >= kRouteFailuresBeforeSuppress) {
         health.suppressedUntil = now + kRouteSuppressTtlMs;
         if (LOGS_ENABLED) {
-            const bool media = route.domain.find("-1.web.telegram.org") != std::string::npos;
             DEBUG_D("wss_route suppressed domain=%s for_ms=%lld next=%s", route.domain.c_str(),
-                    (long long) kRouteSuppressTtlMs, (route.tunnel || media) ? "direct" : "tunnel");
+                    (long long) kRouteSuppressTtlMs, route.tunnel ? "direct" : "tunnel");
         }
     }
 }
@@ -348,15 +347,11 @@ bool OfficialRoute(int32_t dcId, bool mediaConnection, bool testBackend, const s
     result.viaFallback = preferFallback(result);
     result.connectHost = result.viaFallback ? result.relayHostFallback : result.relayHost;
     if (routeSuppressed(result.domain)) {
-        if (mediaConnection) {
-            // Медиа — прямо, без туннеля: на мобильной сети туннель Cloudflare
-            // душится почти до нуля (logs (9)–(12): из 62 смайликов DC1 не
-            // догрузился ни один даже частями по 8 КБ), а у медиа нет лёгких
-            // запросов, которым хватило бы этих крох.
-            return false;
-        }
-        // Основное соединение: сначала туннель через Worker, а если
-        // недоступен и он, соединение идёт напрямую.
+        // Релей этого датацентра недоступен: сначала туннель через Worker, а
+        // если недоступен и он, соединение идёт напрямую. Для медиа пробовали
+        // и прямой путь первым (logs (13)): 27 попыток к медиа DC1, ни одного
+        // TCP-подключения, тогда как задушенный туннель мелкими частями хоть
+        // что-то отдаёт.
         return TunnelRoute(dcAddress, route);
     }
     *route = std::move(result);

@@ -697,7 +697,11 @@ public class FileLog {
         }
 
         FileLog.e("ANR thread dump\n" + sb.toString());
-        getInstance().dumpMemory(false);
+        // No automatic heap dump here: writing a 150 MB hprof suspends the
+        // whole VM for seconds on top of the freeze being reported (users saw
+        // it as the app dying) and bloated log archives to ~50 MB. The thread
+        // dump above is what explains an ANR; a heap dump stays available
+        // from the debug menu.
     }
 
     public static void fatal(final Throwable e, boolean logToAppCenter) {

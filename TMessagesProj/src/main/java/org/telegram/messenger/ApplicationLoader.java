@@ -344,10 +344,12 @@ public class ApplicationLoader extends Application {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
                 ProcessExitDiagnostics.logPreviousExit(applicationContext);
             }
+            ProcessExitDiagnostics.logPreviousCrashStack(applicationContext);
         }
         if (applicationContext == null) {
             applicationContext = getApplicationContext();
         }
+        ProcessExitDiagnostics.installCrashRecorder(applicationContext);
 
         NativeLoader.initNativeLibs(ApplicationLoader.applicationContext);
 
