@@ -4616,7 +4616,14 @@ void ConnectionSocket::closeStepLogDisconnect(int32_t reason, int32_t error, con
         }
         if (LOGS_ENABLED) {
             const std::string session = currentWssTransport != nullptr ? currentWssTransport->takeSessionSummary() : std::string();
-            DEBUG_D("connection(%p) wss_disconnect account%d dc%d media=%d reason=%d reason_text=%s error=%d error_text=%s phase=%s transport_state=%s epoll_registered=%d %s", this, (int) instanceNum, (int) currentDatacenterId, currentMediaConnection ? 1 : 0, reason, mtProxyDisconnectReasonName(reason), error, mtProxySocketErrorName(error), proxyCheckDiagnostic.c_str(), transportStateName(currentTransportState), epollRegistered ? 1 : 0, session.c_str());
+            // The diagnostic says "wss_tls_handshake" from the moment the socket
+            // is opened; a socket that never got TCP up was read as a TLS block
+            // (logs (1) (5): every relay "stuck in TLS" had no tcp_connected).
+            const char *phaseText = proxyCheckDiagnostic.c_str();
+            if (proxyCheckDiagnostic == "wss_tls_handshake" && (currentWssTransport == nullptr || currentWssTransport->handshakePhase() == tgnet::transport::HandshakePhase::None)) {
+                phaseText = "wss_tcp_connect";
+            }
+            DEBUG_D("connection(%p) wss_disconnect account%d dc%d media=%d reason=%d reason_text=%s error=%d error_text=%s phase=%s transport_state=%s epoll_registered=%d %s", this, (int) instanceNum, (int) currentDatacenterId, currentMediaConnection ? 1 : 0, reason, mtProxyDisconnectReasonName(reason), error, mtProxySocketErrorName(error), phaseText, transportStateName(currentTransportState), epollRegistered ? 1 : 0, session.c_str());
         }
         return;
     }
