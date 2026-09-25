@@ -234,6 +234,21 @@ def on_setting_click(plugin_id, index, view=None, screen_token=None):
                 _report_click_error(plugin_id, "on_click")
 
 
+def on_setting_long_click(plugin_id, index, view=None, screen_token=None):
+    """Run a row's on_long_click(view); True unless the callback explicitly returned False."""
+    items = _items_for_screen(plugin_id, screen_token)
+    if not 0 <= index < len(items):
+        return False
+    callback = getattr(items[index], "on_long_click", None)
+    if callback is None:
+        return False
+    try:
+        return callback(view) is not False
+    except Exception:
+        _report_click_error(plugin_id, "on_long_click")
+        return True
+
+
 # ------------------------------------------------------------------ request hook bridge
 
 def has_request_hooks():
@@ -479,6 +494,17 @@ def has_menu_items(menu_type):
             if getattr(item, "menu_type", None) == menu_type:
                 return True
     return False
+
+
+def remove_menu_item(plugin_id, item_id):
+    """Drop a registered menu item by its id; True if something was removed."""
+    inst = _INSTANCES.get(plugin_id)
+    items = getattr(inst, "_menu_items", None) if inst is not None else None
+    if not items:
+        return False
+    before = len(items)
+    inst.remove_menu_item(str(item_id))
+    return len(getattr(inst, "_menu_items", None) or []) < before
 
 
 def invoke_menu_item(plugin_id, item_id, context=None):

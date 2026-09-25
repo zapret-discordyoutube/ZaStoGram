@@ -44,14 +44,14 @@ public final class PluginUtils {
     public static BaseFragment getLastFragment() {
         try {
             LaunchActivity la = LaunchActivity.instance;
-            if (la == null || la.actionBarLayout == null) {
-                return null;
+            if (la != null && la.actionBarLayout != null) {
+                List<BaseFragment> stack = la.actionBarLayout.getFragmentStack();
+                if (stack != null && !stack.isEmpty()) {
+                    return stack.get(stack.size() - 1);
+                }
             }
-            List<BaseFragment> stack = la.actionBarLayout.getFragmentStack();
-            if (stack == null || stack.isEmpty()) {
-                return null;
-            }
-            return stack.get(stack.size() - 1);
+            // Same fallback exteraGram uses (layers, sheets, split layouts).
+            return LaunchActivity.getSafeLastFragment();
         } catch (Throwable t) {
             FileLog.e(t);
             return null;

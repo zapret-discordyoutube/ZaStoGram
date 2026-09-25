@@ -61827,6 +61827,7 @@ public class TLRPC {
 
         public long document_id;
         public TLRPC.Document document; //custom
+        public boolean local; //custom: exteraGram ABI, marks an entity added locally by a plugin
 
         public void readParams(InputSerializedData stream, boolean exception) {
             offset = stream.readInt32(exception);

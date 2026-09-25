@@ -204,11 +204,13 @@ public class LinkifyPort {
             + "(?:" + PATH_AND_QUERY + ")?"
             + WORD_BOUNDARY
             + ")";
+    // Public for exteraGram-compatible code (LocaleUtils) that embeds the URL grammar in larger patterns.
+    public static final String WEB_URL_REGEX = "(" + WEB_URL_WITH_PROTOCOL + "|" + WEB_URL_WITHOUT_PROTOCOL + ")";
     public static Pattern WEB_URL = null;
 
     static {
         try {
-            WEB_URL = Pattern.compile("(" + WEB_URL_WITH_PROTOCOL + "|" + WEB_URL_WITHOUT_PROTOCOL + ")");
+            WEB_URL = Pattern.compile(WEB_URL_REGEX);
         } catch (Exception e) {
             FileLog.e(e);
         }

@@ -11412,4 +11412,7 @@
     <string name="UnsupportedMessageTitle">Unsupported Message</string>
     <string name="UnsupportedMessageMessage">Update Telegram to view this message</string>
     <string name="UnsupportedUpdate">Update</string>
+    <!-- exteraGram ABI: read by DEX plugins (re:extera) via R.string -->
+    <string name="RestartRequired">Restart the app to apply changes</string>
+    <string name="MainMenuHiddenItems">Hidden items</string>
 </resources>

@@ -55,6 +55,10 @@ public class PluginsController {
         refresh();
     }
 
+    public boolean removeMenuItem(String pluginId, String itemId) {
+        return org.telegram.plugins.PluginsController.getInstance().removeMenuItem(pluginId, itemId);
+    }
+
     public static void openPluginSettings(String id) {
         openPluginSettings(id, org.telegram.plugins.PluginUtils.getLastFragment());
     }

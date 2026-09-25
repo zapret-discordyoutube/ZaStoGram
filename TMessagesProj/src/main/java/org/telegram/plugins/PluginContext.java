@@ -36,11 +36,16 @@ public class PluginContext {
 
     /** Hook a single method/constructor. Returns the Unhook handle (also tracked for cleanup). */
     public XC_MethodHook.Unhook hookMethod(Member method, PyObject pyHook) {
+        return hookMethod(method, pyHook, XC_MethodHook.PRIORITY_DEFAULT);
+    }
+
+    /** As hookMethod(method, hook), ordered against other hooks on the same member by priority. */
+    public XC_MethodHook.Unhook hookMethod(Member method, PyObject pyHook, int priority) {
         if (method == null || pyHook == null) {
             return null;
         }
         try {
-            XC_MethodHook.Unhook u = XposedBridge.hookMethod(method, new PythonHook(pluginId, pyHook));
+            XC_MethodHook.Unhook u = XposedBridge.hookMethod(method, new PythonHook(pluginId, pyHook, priority));
             synchronized (unhooks) {
                 unhooks.add(u);
             }
@@ -53,13 +58,17 @@ public class PluginContext {
 
     /** Hook every declared constructor of a class. Returns the list of Unhook handles. */
     public List<XC_MethodHook.Unhook> hookAllConstructors(Class<?> clazz, PyObject pyHook) {
+        return hookAllConstructors(clazz, pyHook, XC_MethodHook.PRIORITY_DEFAULT);
+    }
+
+    public List<XC_MethodHook.Unhook> hookAllConstructors(Class<?> clazz, PyObject pyHook, int priority) {
         List<XC_MethodHook.Unhook> result = new ArrayList<>();
         if (clazz == null || pyHook == null) {
             return result;
         }
         for (Constructor<?> c : clazz.getDeclaredConstructors()) {
             try {
-                XC_MethodHook.Unhook u = XposedBridge.hookMethod(c, new PythonHook(pluginId, pyHook));
+                XC_MethodHook.Unhook u = XposedBridge.hookMethod(c, new PythonHook(pluginId, pyHook, priority));
                 synchronized (unhooks) {
                     unhooks.add(u);
                 }
@@ -77,6 +86,10 @@ public class PluginContext {
      * fully-qualified class-name String. Returns the list of Unhook handles.
      */
     public List<XC_MethodHook.Unhook> hookAllMethods(Object clazz, String methodName, PyObject pyHook) {
+        return hookAllMethods(clazz, methodName, pyHook, XC_MethodHook.PRIORITY_DEFAULT);
+    }
+
+    public List<XC_MethodHook.Unhook> hookAllMethods(Object clazz, String methodName, PyObject pyHook, int priority) {
         List<XC_MethodHook.Unhook> result = new ArrayList<>();
         Class<?> c = resolveClass(clazz);
         if (c == null || pyHook == null) {
@@ -88,7 +101,7 @@ public class PluginContext {
                 continue;
             }
             try {
-                XC_MethodHook.Unhook u = XposedBridge.hookMethod(m, new PythonHook(pluginId, pyHook));
+                XC_MethodHook.Unhook u = XposedBridge.hookMethod(m, new PythonHook(pluginId, pyHook, priority));
                 synchronized (unhooks) {
                     unhooks.add(u);
                 }
@@ -152,6 +165,9 @@ public class PluginContext {
             SharedPreferences p = prefs();
             if (!p.contains(key)) {
                 return def;
+            }
+            if (def == null) {
+                return p.getAll().get(key); // no default to infer from: keep the stored type
             }
             if (def instanceof Boolean) {
                 return p.getBoolean(key, (Boolean) def);
@@ -235,7 +251,8 @@ public class PluginContext {
         private final PyObject pyHook;
         private final boolean replacement;
 
-        PythonHook(String pluginId, PyObject pyHook) {
+        PythonHook(String pluginId, PyObject pyHook, int priority) {
+            super(priority);
             this.pluginId = pluginId;
             this.pyHook = pyHook;
             this.replacement = isReplacement(pyHook);

@@ -69,6 +69,24 @@ def _decode_structured_setting(value, default):
     return _clone_structured_default(default)
 
 
+def _unbox(value):
+    """Java boxed primitive/String -> the native Python value (no default to coerce by)."""
+    if isinstance(value, (bool, int, float, str)):
+        return value
+    try:
+        from java.lang import Boolean, Number, String
+        if isinstance(value, Boolean):
+            return bool(value.booleanValue())
+        if isinstance(value, Number):
+            text = str(value.toString())
+            return float(text) if any(c in text for c in ".eE") else int(text)
+        if isinstance(value, String):
+            return str(value)
+    except Exception:
+        pass
+    return value
+
+
 class HookStrategy:
     """Return strategy for high-level request/response/update/message hooks."""
     DEFAULT = 0        # let the original flow through unchanged
@@ -123,6 +141,133 @@ class XposedHook(MethodHook):
             self._after(param)
 
 
+def _filters_pass(filters, param):
+    for f in filters or ():
+        try:
+            if not f.test(param):
+                return False
+        except Exception:
+            return False
+    return True
+
+
+def hook_filters(*filters):
+    """Run the decorated before/after_hooked_method only when every filter matches."""
+    def decorate(fn):
+        def wrapper(self, param):
+            if _filters_pass(filters, param):
+                return fn(self, param)
+            return None
+        wrapper.__name__ = getattr(fn, "__name__", "hooked_method")
+        wrapper.__doc__ = getattr(fn, "__doc__", None)
+        wrapper._hook_filters = filters
+        return wrapper
+    return decorate
+
+
+class _Filter:
+    def __init__(self, test):
+        self.test = test
+
+
+def _arg(param, index):
+    return param.args[index]
+
+
+def _java_equals(a, b):
+    if a is None or b is None:
+        return a is b
+    try:
+        return bool(a == b) or bool(a.equals(b))
+    except Exception:
+        return a == b
+
+
+class HookFilter:
+    """Conditions for hook callbacks (exteraGram API): pass them to @hook_filters(...) or
+    hook_method(..., before_filters=[...], after_filters=[...])."""
+
+    RESULT_IS_NULL = _Filter(lambda p: p.getResult() is None)
+    RESULT_NOT_NULL = _Filter(lambda p: p.getResult() is not None)
+    RESULT_IS_TRUE = _Filter(lambda p: p.getResult() is True or str(p.getResult()) == "true")
+    RESULT_IS_FALSE = _Filter(lambda p: p.getResult() is False or str(p.getResult()) == "false")
+
+    @staticmethod
+    def ResultIsInstanceOf(clazz):
+        return _Filter(lambda p: p.getResult() is not None and clazz.isInstance(p.getResult()))
+
+    @staticmethod
+    def ResultEqual(value):
+        return _Filter(lambda p: _java_equals(p.getResult(), value))
+
+    @staticmethod
+    def ResultNotEqual(value):
+        return _Filter(lambda p: not _java_equals(p.getResult(), value))
+
+    @staticmethod
+    def ArgumentIsNull(index):
+        return _Filter(lambda p: _arg(p, index) is None)
+
+    @staticmethod
+    def ArgumentNotNull(index):
+        return _Filter(lambda p: _arg(p, index) is not None)
+
+    @staticmethod
+    def ArgumentIsTrue(index):
+        return _Filter(lambda p: _arg(p, index) is True or str(_arg(p, index)) == "true")
+
+    @staticmethod
+    def ArgumentIsFalse(index):
+        return _Filter(lambda p: _arg(p, index) is False or str(_arg(p, index)) == "false")
+
+    @staticmethod
+    def ArgumentIsInstanceOf(index, clazz):
+        return _Filter(lambda p: _arg(p, index) is not None and clazz.isInstance(_arg(p, index)))
+
+    @staticmethod
+    def ArgumentEqual(index, value):
+        return _Filter(lambda p: _java_equals(_arg(p, index), value))
+
+    @staticmethod
+    def ArgumentNotEqual(index, value):
+        return _Filter(lambda p: not _java_equals(_arg(p, index), value))
+
+    @staticmethod
+    def Condition(condition, object=None):
+        """A Python callable(param[, object]) is evaluated as-is. exteraGram also accepts MVEL
+        strings, which this host cannot evaluate: those always pass so the hook still runs."""
+        if callable(condition):
+            def test(p):
+                try:
+                    return bool(condition(p, object))
+                except TypeError:
+                    return bool(condition(p))
+            return _Filter(test)
+        return _Filter(lambda p: True)
+
+    @staticmethod
+    def Or(*filters):
+        return _Filter(lambda p: any(_filters_pass([f], p) for f in filters))
+
+
+class BaseHook(MethodHook):
+    """Functional hook behind hook_method(member, before=..., after=...)."""
+
+    def __init__(self, before=None, after=None, before_filters=None, after_filters=None):
+        self._before = before
+        self._after = after
+        self._before_filters = list(before_filters or [])
+        self._after_filters = list(after_filters or [])
+
+    def before_hooked_method(self, param):
+        if self._before is not None and _filters_pass(self._before_filters, param):
+            self._before(param)
+
+    def after_hooked_method(self, param):
+        if self._after is not None and _filters_pass(self._after_filters, param):
+            self._after(param)
+
+
 class MethodReplacement(MethodHook):
     """
     Xposed-style full method replacement. The return value of replace_hooked_method(param) becomes
@@ -141,6 +286,7 @@ class MenuItemType:
     DRAWER_MENU = "drawer_menu"                     # main navigation drawer
     CHAT_ACTION_MENU = "chat_action_menu"           # 3-dot menu inside a chat
     PROFILE_ACTION_MENU = "profile_action_menu"     # 3-dot menu on a profile
+    MAIN_MENU = "main_menu"                         # exteraGram main menu (not rendered by ZaStoGram)
 
 
 class MenuItemData:
@@ -161,15 +307,27 @@ class MenuItemData:
         self.priority = priority
 
 
+_DEFAULT_HOOK_PRIORITY = 50  # XCallback.PRIORITY_DEFAULT
+
+
 class BasePlugin:
+    # Class-level defaults: many community plugins define __init__ without calling
+    # super().__init__(), so nothing here may depend on BasePlugin.__init__ having run.
+    _context = None           # Java org.telegram.plugins.PluginContext
+    id = None
+    name = None
+    _send_message_hook = False  # set by add_on_send_message_hook()
 
     def __init__(self):
-        self._context = None      # Java org.telegram.plugins.PluginContext
-        self.id = None
-        self.name = None
         self._request_hooks = []  # (name, match_substring) filters from add_hook()
         self._menu_items = []     # MenuItemData registered via add_menu_item()
-        self._send_message_hook = False  # set by add_on_send_message_hook()
+
+    def _own_list(self, attr):
+        value = self.__dict__.get(attr)
+        if value is None:
+            value = []
+            setattr(self, attr, value)
+        return value
 
     # ------------------------------------------------------------------ lifecycle
 
@@ -245,13 +403,27 @@ class BasePlugin:
 
     # ------------------------------------------------------------------ method hooking
 
-    def hook_method(self, method, hook):
-        return self._context.hookMethod(method, hook)
+    @staticmethod
+    def _make_hook(hook, before, after, before_filters, after_filters):
+        if hook is not None:
+            return hook
+        if before is None and after is None:
+            raise ValueError("hook_method needs a hook object or before=/after= callables")
+        return BaseHook(before, after, before_filters, after_filters)
 
-    def hook_all_constructors(self, clazz, hook):
-        return self._context.hookAllConstructors(clazz, hook)
+    def hook_method(self, method, hook=None, priority=_DEFAULT_HOOK_PRIORITY, before=None,
+                    after=None, before_filters=None, after_filters=None):
+        """Hook one Method/Constructor with a MethodHook/MethodReplacement or before=/after=."""
+        hook = self._make_hook(hook, before, after, before_filters, after_filters)
+        return self._context.hookMethod(method, hook, int(priority))
 
-    def hook_all_methods(self, clazz, method_name=None, hook=None):
+    def hook_all_constructors(self, clazz, hook=None, priority=_DEFAULT_HOOK_PRIORITY, before=None,
+                              after=None, before_filters=None, after_filters=None):
+        hook = self._make_hook(hook, before, after, before_filters, after_filters)
+        return self._context.hookAllConstructors(clazz, hook, int(priority))
+
+    def hook_all_methods(self, clazz, method_name=None, hook=None, priority=_DEFAULT_HOOK_PRIORITY,
+                         before=None, after=None, before_filters=None, after_filters=None):
         """
         Hook all overloads of method_name on clazz (Xposed-style hookAllMethods). clazz may be a
         java.lang.Class or a fully-qualified class-name string. The shorter form
@@ -260,7 +432,8 @@ class BasePlugin:
         if hook is None and method_name is not None and not isinstance(method_name, str):
             hook = method_name      # called as hook_all_methods(clazz, hook)
             method_name = None
-        return self._context.hookAllMethods(clazz, method_name, hook)
+        hook = self._make_hook(hook, before, after, before_filters, after_filters)
+        return self._context.hookAllMethods(clazz, method_name, hook, int(priority))
 
     def unhook_method(self, unhook):
         if unhook is not None:
@@ -268,7 +441,7 @@ class BasePlugin:
 
     def add_hook(self, request_name, match_substring=False, priority=0):
         """Register interest in a (TL) request name so pre/post_request_hook fires for it."""
-        self._request_hooks.append((str(request_name), bool(match_substring)))
+        self._own_list("_request_hooks").append((str(request_name), bool(match_substring)))
         return (request_name, match_substring)
 
     def add_on_send_message_hook(self, priority=0):
@@ -281,12 +454,12 @@ class BasePlugin:
             self._send_message_hook = False
             return True
         if hook_name in ("pre_request_hook", "post_request_hook"):
-            self._request_hooks.clear()
+            self._own_list("_request_hooks").clear()
             return True
         return False
 
     def _matches_request(self, request_name):
-        if not self._request_hooks:
+        if not self.__dict__.get("_request_hooks"):
             return None  # no filters → caller decides
         for name, substring in self._request_hooks:
             if substring:
@@ -300,12 +473,12 @@ class BasePlugin:
 
     def add_menu_item(self, item):
         """Register a MenuItemData; it appears in the menu named by item.menu_type."""
-        self._menu_items.append(item)
+        self._own_list("_menu_items").append(item)
         return item.item_id if getattr(item, "item_id", None) is not None else item
 
     def remove_menu_item(self, item_id):
         """Remove a previously added menu item by its item_id (or the object returned by add)."""
-        self._menu_items = [m for m in self._menu_items
+        self._menu_items = [m for m in self._own_list("_menu_items")
                             if m is not item_id and getattr(m, "item_id", None) != item_id]
 
     # ------------------------------------------------------------------ settings storage
@@ -332,6 +505,8 @@ class BasePlugin:
                 return float(value)
             except Exception:
                 return default
+        if default is None:
+            return _unbox(value)
         return str(value)
 
     def set_setting(self, key, value, reload_settings=False):

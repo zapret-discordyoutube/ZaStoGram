@@ -58,6 +58,11 @@ public class UItem extends AdapterWithDiffUtils.Item {
 
     public View.OnClickListener clickCallback;
     public View.OnClickListener clickCallback2;
+    // exteraGram ABI (used by DEX plugins): check rows with a wrapped value line, and expandable
+    // switches whose collapse arrow reports to switchClickCallback instead of clickCallback.
+    public boolean multiline;
+    public boolean exteraExpandableSwitch;
+    public View.OnClickListener switchClickCallback;
     public Utilities.Callback<View> bind;
 
     public Object object;
@@ -299,6 +304,15 @@ public class UItem extends AdapterWithDiffUtils.Item {
         return i;
     }
 
+    public static UItem asCheck(int id, CharSequence text, CharSequence value, boolean multiline) {
+        UItem i = new UItem(UniversalAdapter.VIEW_TYPE_CHECK, false);
+        i.id = id;
+        i.text = text;
+        i.textValue = value;
+        i.multiline = multiline;
+        return i;
+    }
+
     public static UItem asRadio(int id, CharSequence text) {
         UItem i = new UItem(UniversalAdapter.VIEW_TYPE_RADIO, false);
         i.id = id;
@@ -328,6 +342,10 @@ public class UItem extends AdapterWithDiffUtils.Item {
         i.text = text;
         i.subtext = subtext;
         return i;
+    }
+
+    public static UItem asShadow() {
+        return new UItem(UniversalAdapter.VIEW_TYPE_SHADOW, false);
     }
 
     public static UItem asShadow(CharSequence text) {
@@ -543,6 +561,16 @@ public class UItem extends AdapterWithDiffUtils.Item {
         return item;
     }
 
+    public static UItem asExteraExpandableSwitch(int id, CharSequence text, CharSequence subText, View.OnClickListener switchClick) {
+        UItem item = new UItem(UniversalAdapter.VIEW_TYPE_EXPANDABLE_SWITCH, false);
+        item.id = id;
+        item.text = text;
+        item.animatedText = subText;
+        item.exteraExpandableSwitch = true;
+        item.switchClickCallback = switchClick;
+        return item;
+    }
+
     public static UItem asGraySection(CharSequence text) {
         UItem item = new UItem(UniversalAdapter.VIEW_TYPE_GRAY_SECTION, false);
         item.text = text;
@@ -651,6 +679,11 @@ public class UItem extends AdapterWithDiffUtils.Item {
         if (viewType == UniversalAdapter.VIEW_TYPE_FILTER_CHAT) {
             viewType = UniversalAdapter.VIEW_TYPE_FILTER_CHAT_CHECK;
         }
+        return this;
+    }
+
+    public UItem setTransparent(boolean transparent) {
+        this.transparent = transparent;
         return this;
     }
 
@@ -834,6 +867,15 @@ public class UItem extends AdapterWithDiffUtils.Item {
                 factories.put(factory.viewType, factory);
             }
         };
+
+        /**
+         * Register this exact instance under its own viewType. setup() dedupes by class, which
+         * breaks factories that share one class but differ per instance (plugin-defined rows).
+         */
+        public static void setupInstance(UItemFactory factory) {
+            if (factories == null) factories = new LongSparseArray<>();
+            factories.put(factory.viewType, factory);
+        }
 
         public final int viewType;
 

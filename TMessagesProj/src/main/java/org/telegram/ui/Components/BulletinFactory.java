@@ -719,6 +719,17 @@ public final class BulletinFactory {
         return create(layout, Bulletin.DURATION_LONG);
     }
 
+    // exteraGram ABI: DEX plugins pass formatted text and rely on **bold** tag replacement.
+    public Bulletin createEmojiBulletin(String emoji, CharSequence text) {
+        final Bulletin.LottieLayout layout = new Bulletin.LottieLayout(getContext(), resourcesProvider);
+        layout.setAnimation(MediaDataController.getInstance(UserConfig.selectedAccount).getEmojiAnimatedSticker(emoji), 36, 36);
+        layout.textView.setText(AndroidUtilities.replaceTags(text instanceof SpannableStringBuilder
+                ? (SpannableStringBuilder) text : new SpannableStringBuilder(text == null ? "" : text)));
+        layout.textView.setSingleLine(false);
+        layout.textView.setMaxLines(2);
+        return create(layout, Bulletin.DURATION_LONG);
+    }
+
     public Bulletin createEmojiBulletin(String emoji, String text, String button, Runnable onButtonClick) {
         return createEmojiBulletin(MediaDataController.getInstance(UserConfig.selectedAccount).getEmojiAnimatedSticker(emoji), text, button, onButtonClick);
     }

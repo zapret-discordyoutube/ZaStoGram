@@ -207,7 +207,7 @@ def send_document(dialog_id, file_path, caption="", replyToMsg=None, replyToTopM
         caption_entities = parsed_caption.get("entities", caption_entities)
     PluginUtils.sendDocument(
         int(dialog_id), str(file_path), caption if caption is not None else "",
-        caption_entities, replyToMsg, replyToTopMsg, replyQuote)
+        _java_list(caption_entities), replyToMsg, replyToTopMsg, replyQuote)
 
 
 def send_text(peer_id, text, parse_mode=None, **kwargs):
@@ -253,10 +253,22 @@ _SEND_SKIP_KEYS = {
 }
 
 
+def _java_list(value):
+    """Python list/tuple -> java.util.ArrayList. Chaquopy passes a bare list to an Object or
+    ArrayList parameter as an opaque PyObject, so entity lists would otherwise be dropped."""
+    if isinstance(value, (list, tuple)):
+        from java.util import ArrayList
+        result = ArrayList()
+        for item in value:
+            result.add(item)
+        return result
+    return value
+
+
 def _set_param_field(obj, name, value):
     """Best-effort public-field set on a Java object; unknown/incompatible fields are ignored."""
     try:
-        setattr(obj, name, value)
+        setattr(obj, name, _java_list(value))
     except Exception:
         from android_utils import log
         log("send_message: cannot set field '%s'" % name)
@@ -341,7 +353,7 @@ def edit_message(message_obj, text=None, file_path=None, parse_mode=None, with_s
     PluginUtils.editMessage(
         message_obj,
         None if text is None else str(text),
-        entities,
+        _java_list(entities),
         None if file_path is None else str(file_path),
         bool(has_media_spoilers),
     )

@@ -99,6 +99,24 @@ public class PluginsController {
         }
     }
 
+    /**
+     * exteraGram loads plugins once the UI is up, and plugins rely on that: on_plugin_load()
+     * commonly calls get_last_fragment().getContext(). Our startup runs from postInitApplication,
+     * possibly before the first fragment, so wait for one briefly on the plugin queue (not the
+     * UI thread). A process started without UI (push) just proceeds after the timeout.
+     */
+    private static void awaitFirstFragment() {
+        long deadline = android.os.SystemClock.elapsedRealtime() + 5000;
+        while (PluginUtils.getLastFragment() == null && android.os.SystemClock.elapsedRealtime() < deadline) {
+            try {
+                Thread.sleep(100);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                return;
+            }
+        }
+    }
+
     /** Starts the runtime after Telegram startup, and only if it has useful work to do. */
     public void startEnabledPlugins() {
         if (appContext == null || queue == null || startupRequested) {
@@ -125,6 +143,7 @@ public class PluginsController {
                     return;
                 }
                 ensurePythonStarted();
+                awaitFirstFragment();
                 for (PluginInfo info : snapshot) {
                     if (info.enabled && isCompatible(info)) {
                         loadPluginInternal(info);
@@ -630,6 +649,20 @@ public class PluginsController {
         }
     }
 
+    /** Long press on a settings row; true if the plugin's on_long_click consumed it. */
+    public boolean onSettingLongClick(String id, int index, Object view, String screenToken) {
+        if (!isPythonReady()) {
+            return false;
+        }
+        try {
+            PyObject handled = loader.callAttr("on_setting_long_click", id, index, view, screenToken);
+            return handled != null && Boolean.TRUE.equals(handled.toJava(Boolean.class));
+        } catch (Throwable t) {
+            logError(id, "on_setting_long_click", t);
+            return false;
+        }
+    }
+
     @SuppressWarnings("unchecked")
     public Map<String, Object> createSubSettings(String id, String screenToken, int index) {
         if (!isPythonReady()) {
@@ -854,6 +887,20 @@ public class PluginsController {
             loader.callAttr("invoke_menu_item", pluginId, itemId, context);
         } catch (Throwable t) {
             logError(pluginId, "invoke_menu_item", t);
+        }
+    }
+
+    /** Remove a plugin's menu item by id; false if the plugin or item is unknown. */
+    public boolean removeMenuItem(String pluginId, String itemId) {
+        if (!isPythonReady()) {
+            return false;
+        }
+        try {
+            PyObject removed = loader.callAttr("remove_menu_item", pluginId, itemId);
+            return removed != null && removed.toJava(Boolean.class);
+        } catch (Throwable t) {
+            logError(pluginId, "remove_menu_item", t);
+            return false;
         }
     }
 

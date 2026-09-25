@@ -700,6 +700,7 @@ public class UniversalAdapter extends AdapterWithDiffUtils {
                 } else {
                     cell.setColors(Theme.key_windowBackgroundWhiteGrayIcon, Theme.key_windowBackgroundWhiteBlackText);
                 }
+                cell.setSubtitle(item.subtext); // plugin Text rows carry a second line; null hides it on recycled cells
                 cell.setEnabled(item.enabled, true);
                 break;
             case VIEW_TYPE_CHECK:
@@ -709,7 +710,12 @@ public class UniversalAdapter extends AdapterWithDiffUtils {
                     checkCell.setChecked(item.checked);
                 }
                 checkCell.setEnabled(item.enabled, null);
-                checkCell.setTextAndCheck(item.text, item.checked, divider);
+                if (TextUtils.isEmpty(item.textValue)) {
+                    checkCell.setTextAndCheck(item.text, item.checked, divider);
+                } else {
+                    checkCell.setTextAndValueAndCheck(item.text == null ? "" : item.text.toString(), item.textValue.toString(), item.checked, item.multiline, divider);
+                }
+                checkCell.setIcon(item.iconResId);
                 checkCell.itemId = item.id;
                 if (viewType == VIEW_TYPE_CHECKRIPPLE) {
                     holder.itemView.setBackgroundColor(Theme.getColor(item.checked ? Theme.key_windowBackgroundChecked : Theme.key_windowBackgroundUnchecked));
@@ -1049,7 +1055,10 @@ public class UniversalAdapter extends AdapterWithDiffUtils {
                         switchCell.hideCollapseArrow();
                     } else {
                         switchCell.setCollapseArrow(item.animatedText.toString(), item.collapsed, () -> {
-                            item.clickCallback.onClick(switchCell);
+                            View.OnClickListener callback = item.exteraExpandableSwitch ? item.switchClickCallback : item.clickCallback;
+                            if (callback != null) {
+                                callback.onClick(switchCell);
+                            }
                         });
                     }
                 }

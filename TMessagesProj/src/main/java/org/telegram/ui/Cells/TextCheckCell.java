@@ -437,6 +437,44 @@ public class TextCheckCell extends FrameLayout {
         attached = false;
     }
 
+    private int iconBasePadding = -1;
+
+    /** Plain leading icon (exteraGram ABI, used by plugin settings); 0 removes it. */
+    public void setIcon(int resId) {
+        if (resId == 0 && imageView == null) {
+            return;
+        }
+        if (iconBasePadding < 0) {
+            iconBasePadding = padding;
+        }
+        if (imageView == null) {
+            imageView = new RLottieImageView(getContext());
+            imageView.setScaleType(ImageView.ScaleType.CENTER);
+            addView(imageView, LayoutHelper.createFrame(29, 29, (LocaleController.isRTL ? Gravity.RIGHT : Gravity.LEFT) | Gravity.CENTER_VERTICAL, 19, 0, 19, 0));
+        }
+        int start = AndroidUtilities.dp(resId != 0 ? 65 : iconBasePadding);
+        for (View view : new View[]{textView, valueTextView}) {
+            if (view != null && view.getLayoutParams() instanceof MarginLayoutParams) {
+                MarginLayoutParams lp = (MarginLayoutParams) view.getLayoutParams();
+                if (LocaleController.isRTL) {
+                    lp.rightMargin = start;
+                } else {
+                    lp.leftMargin = start;
+                }
+                view.setLayoutParams(lp);
+            }
+        }
+        if (resId == 0) {
+            imageView.setVisibility(GONE);
+            return;
+        }
+        imageView.setVisibility(VISIBLE);
+        imageView.setPadding(0, 0, 0, 0);
+        imageView.setBackground(null);
+        imageView.setImageResource(resId);
+        imageView.setColorFilter(new PorterDuffColorFilter(Theme.getColor(Theme.key_windowBackgroundWhiteGrayIcon, resourcesProvider), PorterDuff.Mode.SRC_IN));
+    }
+
     public void setColorfullIcon(int color, int resId) {
         if (imageView == null) {
             imageView = new RLottieImageView(getContext());
