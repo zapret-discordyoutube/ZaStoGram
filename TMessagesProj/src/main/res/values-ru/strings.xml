@@ -443,4 +443,7 @@
     <string name="MessageTechnicalDetailsRefresh">Обновить</string>
     <string name="LiteProfileAvatarBlur">Размытие под фото профиля</string>
     <string name="LiteProfileAvatarBlurInfo">Размытая подложка под фото профиля и кнопками действий. На старых устройствах лучше не включать: без неё раскрытие фото профиля работает гораздо плавнее.</string>
+    <string name="ZaStoVideoSpeed">Скорость</string>
+    <string name="ZaStoVideoBrightness">Яркость</string>
+    <string name="ZaStoVideoVolume">Громкость</string>
 </resources>

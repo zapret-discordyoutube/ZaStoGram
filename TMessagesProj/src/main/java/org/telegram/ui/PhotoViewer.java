@@ -292,6 +292,7 @@ import org.telegram.ui.Components.SeekSpeedDrawable;
 import org.telegram.ui.Components.ShareAlert;
 import org.telegram.ui.Components.SizeNotifierFrameLayoutPhoto;
 import org.telegram.ui.Components.SpeedIconDrawable;
+import org.telegram.ui.Components.ZaStoVideoAdjustLayout;
 import org.telegram.ui.Components.StickersAlert;
 import org.telegram.ui.Components.TextViewSwitcher;
 import org.telegram.ui.Components.ThanosEffect;
@@ -356,7 +357,9 @@ public class PhotoViewer implements NotificationCenter.NotificationCenterDelegat
     private final static float ZOOM_SCALE = 0.1f;
     private final static int MARK_DEFERRED_IMAGE_LOADING = 1;
 
-    private boolean ALLOW_USE_SURFACE = Build.VERSION.SDK_INT >= 30;
+    // ZaStoGram: всегда TextureView — усиление яркости видео накладывается краской слоя,
+    // а у SurfaceView кадр идёт мимо отрисовки View.
+    private boolean ALLOW_USE_SURFACE = false;
 
     private int classGuid;
     private PhotoViewerProvider placeProvider;
@@ -918,6 +921,7 @@ public class PhotoViewer implements NotificationCenter.NotificationCenterDelegat
     private CastMediaRouteButton castItemButton;
     private LinearLayout itemsLayout;
     private SpeedButtonsLayout chooseSpeedLayout;
+    private ZaStoVideoAdjustLayout videoAdjustLayout;
     private ChooseDownloadQualityLayout chooseDownloadQualityLayout;
     private Map<View, Boolean> actionBarItemsVisibility = new HashMap<>(3);
     private BackgroundDrawable backgroundDrawable = new BackgroundDrawable(0xff000000);
@@ -5795,7 +5799,12 @@ public class PhotoViewer implements NotificationCenter.NotificationCenterDelegat
         videoItem.getPopupLayout().setFitItems(true);
         videoItem.setMenuXOffset(dp(3));
 
-        speedItem = new ActionBarMenuSlider.SpeedSlider(activityContext, resourcesProvider);
+        speedItem = new ActionBarMenuSlider.SpeedSlider(activityContext, resourcesProvider) {
+            @Override
+            protected String getRightStringValue(float value) {
+                return ZaStoVideoAdjustLayout.formatSpeed(getSpeed(value)) + "x";
+            }
+        };
         speedItem.setStops(new float[]{0.5f, 1.0f, 1.5f, 2.0f, 2.5f});
         speedItem.setMinimumWidth(AndroidUtilities.dp(196));
         speedItem.setDrawShadow(false);
@@ -5804,9 +5813,28 @@ public class PhotoViewer implements NotificationCenter.NotificationCenterDelegat
         speedItem.setLabel(LocaleController.getString(R.string.VideoPlayerSpeed));
         speedItem.setOnValueChange((value, isFinal) -> {
             final float speed = ActionBarMenuSlider.SpeedSlider.MIN_SPEED + (ActionBarMenuSlider.SpeedSlider.MAX_SPEED - ActionBarMenuSlider.SpeedSlider.MIN_SPEED) * value;
-            chooseSpeed(speed, isFinal, false);
+            chooseSpeed(ZaStoVideoAdjustLayout.snap(speed, ZaStoVideoAdjustLayout.SPEED_STEP, ActionBarMenuSlider.SpeedSlider.MIN_SPEED, ActionBarMenuSlider.SpeedSlider.MAX_SPEED), isFinal, false);
         });
         videoItem.getPopupLayout().addView(speedItem, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, 44));
+        videoAdjustLayout = new ZaStoVideoAdjustLayout(activityContext, new ZaStoVideoAdjustLayout.Delegate() {
+            @Override
+            public void onSpeedChanged(float speed, boolean isFinal) {
+                chooseSpeed(speed, isFinal, false);
+            }
+
+            @Override
+            public void onBrightnessChanged(float gain) {
+                applyVideoBrightness();
+            }
+
+            @Override
+            public void onVolumeChanged(float gain) {
+                if (videoPlayer != null) {
+                    videoPlayer.setAudioGain(gain);
+                }
+            }
+        });
+        videoItem.getPopupLayout().addView(videoAdjustLayout, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT));
         speedGap = videoItem.addColoredGap();
         speedGap.setColor(0xff181818);
         videoItem.getPopupLayout().addView(chooseSpeedLayout = new SpeedButtonsLayout(activityContext, this::chooseSpeed));
@@ -8484,10 +8512,11 @@ public class PhotoViewer implements NotificationCenter.NotificationCenterDelegat
             if (Math.abs(currentVideoSpeed - 1f) < 0.001f) {
                 videoItemIcon.topText.setText("", animated);
             } else {
-                videoItemIcon.topText.setText(SpeedIconDrawable.formatNumber(currentVideoSpeed) + "x", animated);
+                videoItemIcon.topText.setText(ZaStoVideoAdjustLayout.formatSpeed(currentVideoSpeed) + "x", animated);
             }
         }
         speedItem.setSpeed(currentVideoSpeed, animated);
+        videoAdjustLayout.setSpeed(currentVideoSpeed);
         chooseSpeedLayout.update(currentVideoSpeed, isFinal);
     }
 
@@ -10519,6 +10548,8 @@ public class PhotoViewer implements NotificationCenter.NotificationCenterDelegat
                     }
                 };
                 videoPlayer.setOnQualityChangeListener(this::updateQualityItems);
+                videoPlayer.setAudioGainEnabled(true);
+                videoPlayer.setAudioGain(ZaStoVideoAdjustLayout.getVolumeGain());
                 if (PipUtils.checkPermissions(parentActivity) == PipPermissions.PIP_GRANTED_PIP) {
                     pipSource = new PipSource.Builder(parentActivity, this)
                         .setTagPrefix("photo-viewer-" + videoPlayer.playerId)
@@ -10961,6 +10992,7 @@ public class PhotoViewer implements NotificationCenter.NotificationCenterDelegat
             videoTextureView.setPivotX(0);
             videoTextureView.setPivotY(0);
             videoTextureView.setOpaque(false);
+            applyVideoBrightness();
             aspectRatioFrameLayout.addView(videoTextureView, LayoutHelper.createFrame(LayoutHelper.MATCH_PARENT, LayoutHelper.MATCH_PARENT, Gravity.CENTER));
         } else {
             aspectRatioFrameLayout.addView(videoSurfaceView, LayoutHelper.createFrame(LayoutHelper.MATCH_PARENT, LayoutHelper.MATCH_PARENT, Gravity.CENTER));
@@ -14037,6 +14069,7 @@ public class PhotoViewer implements NotificationCenter.NotificationCenterDelegat
         menuItem.hideSubItem(gallery_menu_set_as_main);
         menuItem.hideSubItem(gallery_menu_delete);
         speedItem.setVisibility(View.GONE);
+        videoAdjustLayout.setVisibility(View.GONE);
         speedGap.setVisibility(View.GONE);
         videoItem.setVisibility(View.GONE);
         actionBar.setTranslationY(0);
@@ -14674,6 +14707,7 @@ public class PhotoViewer implements NotificationCenter.NotificationCenterDelegat
                     menuItem.checkHideMenuItem();
                 } else {
                     speedItem.setVisibility(View.GONE);
+                    videoAdjustLayout.setVisibility(View.GONE);
                     videoItem.setVisibility(View.GONE);
                     speedGap.setVisibility(View.GONE);
                     menuItem.hideSubItem(gallery_menu_openin);
@@ -15747,6 +15781,8 @@ public class PhotoViewer implements NotificationCenter.NotificationCenterDelegat
             }
             if (isVideo && !isLivePhoto || isEmbedVideo) {
                 speedItem.setVisibility(View.VISIBLE);
+                videoAdjustLayout.setVisibility(View.VISIBLE);
+                videoAdjustLayout.setGainVisible(!isEmbedVideo);
                 videoItem.setVisibility(View.VISIBLE);
                 menuItem.showSubItem(gallery_menu_speed);
                 menuItem.setSubItemShown(gallery_menu_save_current_frame, !isEmbedVideo && allowShare);
@@ -15754,6 +15790,7 @@ public class PhotoViewer implements NotificationCenter.NotificationCenterDelegat
                 speedGap.setVisibility(menuItem.getVisibleSubItemsCount() > 1 ? View.VISIBLE : View.GONE);
             } else {
                 speedItem.setVisibility(View.GONE);
+                videoAdjustLayout.setVisibility(View.GONE);
                 videoItem.setVisibility(View.GONE);
                 speedGap.setVisibility(View.GONE);
                 menuItem.setSubItemShown(gallery_menu_save_current_frame, false);
@@ -23228,6 +23265,14 @@ public class PhotoViewer implements NotificationCenter.NotificationCenterDelegat
                 Browser.openUrl(LaunchActivity.instance != null ? LaunchActivity.instance : activityContext, Uri.parse(currentMessageObject.sponsoredUrl), true, false, false, null, null, false, MessagesController.getInstance(currentAccount).sponsoredLinksInappAllow, false);
             }
         });
+    }
+
+    private void applyVideoBrightness() {
+        // Редактор отправки рисует кадр своими шейдерами, усиление там не нужно.
+        if (videoTextureView == null || videoTextureView instanceof VideoEditTextureView) {
+            return;
+        }
+        videoTextureView.setLayerPaint(ZaStoVideoAdjustLayout.createBrightnessPaint(ZaStoVideoAdjustLayout.getBrightnessGain()));
     }
 
     private void chooseSpeed(float speed, boolean isFinal, boolean closeMenu) {

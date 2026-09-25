@@ -89,6 +89,7 @@ import org.telegram.messenger.NotificationCenter;
 import org.telegram.messenger.R;
 import org.telegram.messenger.SharedConfig;
 import org.telegram.messenger.Utilities;
+import org.telegram.messenger.video.ZaStoAudioGainProcessor;
 import org.telegram.messenger.chromecast.ChromecastMedia;
 import org.telegram.messenger.chromecast.ChromecastMediaVariations;
 import org.telegram.messenger.secretmedia.ExtendedDefaultDataSourceFactory;
@@ -174,6 +175,9 @@ public class VideoPlayer implements Player.Listener, VideoListener, AnalyticsLis
 
     private VideoPlayerDelegate delegate;
     private AudioVisualizerDelegate audioVisualizerDelegate;
+    private boolean audioGainEnabled;
+    private float audioGain = 1f;
+    private ZaStoAudioGainProcessor audioGainProcessor;
     private int lastReportedPlaybackState;
     private boolean lastReportedPlayWhenReady;
 
@@ -249,7 +253,7 @@ public class VideoPlayer implements Player.Listener, VideoListener, AnalyticsLis
 
         if (player == null) {
             DefaultRenderersFactory factory;
-            if (audioVisualizerDelegate != null) {
+            if (audioVisualizerDelegate != null || audioGainEnabled) {
                 factory = new AudioVisualizerRenderersFactory(ApplicationLoader.applicationContext);
             } else {
                 factory = new DefaultRenderersFactory(ApplicationLoader.applicationContext);
@@ -1591,6 +1595,19 @@ public class VideoPlayer implements Player.Listener, VideoListener, AnalyticsLis
         this.audioVisualizerDelegate = audioVisualizerDelegate;
     }
 
+    // Включать до первого prepare: обработчик ставится в аудиотракт при создании плеера.
+    public void setAudioGainEnabled(boolean enabled) {
+        audioGainEnabled = enabled;
+    }
+
+    public void setAudioGain(float gain) {
+        audioGain = gain;
+        ZaStoAudioGainProcessor processor = audioGainProcessor;
+        if (processor != null) {
+            processor.setGain(gain);
+        }
+    }
+
     public int getBufferedPercentage() {
         return isStreaming ? (player != null ? player.getBufferedPercentage() : 0) : 100;
     }
@@ -1800,12 +1817,21 @@ public class VideoPlayer implements Player.Listener, VideoListener, AnalyticsLis
                 @NonNull Context context,
                 boolean enableFloatOutput,
                 boolean enableAudioTrackPlaybackParams) {
+            ArrayList<AudioProcessor> processors = new ArrayList<>();
+            if (audioGainEnabled) {
+                // Своя копия на каждый sink: старый плеер может ещё освобождаться.
+                ZaStoAudioGainProcessor gainProcessor = new ZaStoAudioGainProcessor();
+                gainProcessor.setGain(audioGain);
+                audioGainProcessor = gainProcessor;
+                processors.add(gainProcessor);
+            }
+            if (audioVisualizerDelegate != null) {
+                processors.add(new TeeAudioProcessor(new VisualizerBufferSink()));
+            }
             return new DefaultAudioSink.Builder(context)
                     .setEnableFloatOutput(enableFloatOutput)
                     .setEnableAudioTrackPlaybackParams(enableAudioTrackPlaybackParams)
-                    .setAudioProcessors(new AudioProcessor[]{
-                            new TeeAudioProcessor(new VisualizerBufferSink())
-                    })
+                    .setAudioProcessors(processors.toArray(new AudioProcessor[0]))
                     .build();
         }
     }

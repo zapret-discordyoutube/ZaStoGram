@@ -6422,6 +6422,9 @@
     <string name="LiteSmoothTransitionsInfo">You can disable animated transitions between different sections of the apps.</string>
     <string name="LiteProfileAvatarBlur">Blur Behind Profile Photo</string>
     <string name="LiteProfileAvatarBlurInfo">Blurred backdrop under the profile photo and its action buttons. Keep it off on older devices: expanding a profile photo becomes much smoother.</string>
+    <string name="ZaStoVideoSpeed">Speed</string>
+    <string name="ZaStoVideoBrightness">Brightness</string>
+    <string name="ZaStoVideoVolume">Volume</string>
     <string name="DynamicPackOrder">Dynamic Pack Order</string>
     <string name="DynamicPackOrderInfo">Automatically place recently used sticker packs at the front of the panel.</string>
     <string name="DynamicPackOrderOff">Dynamic Order Off</string>

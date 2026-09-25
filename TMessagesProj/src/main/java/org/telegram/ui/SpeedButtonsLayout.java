@@ -91,10 +91,10 @@ public class SpeedButtonsLayout extends LinearLayout {
         for (int a = 0; a < speedItems.length; a++) {
             if (isFinal && (
                     a == 0 && Math.abs(currentVideoSpeed - 0.2f) < 0.01f ||
-                            a == 1 && Math.abs(currentVideoSpeed - 0.5f) < 0.1f ||
-                            a == 2 && Math.abs(currentVideoSpeed - 1.0f) < 0.1f ||
-                            a == 3 && Math.abs(currentVideoSpeed - 1.5f) < 0.1f ||
-                            a == 4 && Math.abs(currentVideoSpeed - 2.0f) < 0.1f
+                            a == 1 && Math.abs(currentVideoSpeed - 0.5f) < 0.01f ||
+                            a == 2 && Math.abs(currentVideoSpeed - 1.0f) < 0.01f ||
+                            a == 3 && Math.abs(currentVideoSpeed - 1.5f) < 0.01f ||
+                            a == 4 && Math.abs(currentVideoSpeed - 2.0f) < 0.01f
             )) {
                 speedItems[a].setColors(0xff6BB6F9, 0xff6BB6F9);
             } else {
