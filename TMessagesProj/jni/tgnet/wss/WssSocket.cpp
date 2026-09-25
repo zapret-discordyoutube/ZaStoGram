@@ -97,6 +97,10 @@ constexpr int64_t kRouteSuppressTtlMs = 2 * 60 * 1000;
 // replaced after one 8 KB part (ConnectionSocket WSS_TUNNEL_ROTATE_BYTES), so
 // a tunnel that delivered this much is working, even if it would freeze later.
 constexpr uint64_t kTunnelProofBytes = 6 * 1024;
+// A ready tunnel socket closed sooner than this without data was cut by a
+// connect timeout, not found silent (desktop log 25.09: the first answer
+// comes ~1.1 s after the socket opens).
+constexpr int64_t kTunnelSilentAfterMs = 4000;
 // На старте десятки соединений всех аккаунтов открываются разом, и их
 // таймауты приходят пачкой. Одна пачка — один провал, а не «три подряд».
 constexpr int64_t kRouteFailureCoalesceMs = 2000;
@@ -935,7 +939,8 @@ void Socket::timedOut() {
     }
     if (!isReady()) {
         noteAttemptFailed();
-    } else if (routeConfig.tunnel && !speculative && bytesIn == 0) {
+    } else if (routeConfig.tunnel && !speculative && bytesIn == 0
+            && readyAtMs != 0 && monotonicMillis() - readyAtMs >= kTunnelSilentAfterMs) {
         // The tunnel upgraded and then delivered nothing at all. A tunnel that
         // froze after some data is throttled, not dead: suppressing it sent
         // DC1/DC5 media to direct TCP, which the same network blocks outright
