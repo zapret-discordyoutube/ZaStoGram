@@ -376,6 +376,7 @@ python3 Tools/check_wss_official_default.py
 python3 Tools/check_build_apk_workflow.py
 python3 Tools/check_forgejo_update_contract.py
 python3 Tools/check_plugin_client_utils_contract.py
+python3 Tools/check_plugin_alert_contract.py
 python3 Tools/check_plugin_python_deps.py
 python3 Tools/check_runtime_resilience.py
 ```

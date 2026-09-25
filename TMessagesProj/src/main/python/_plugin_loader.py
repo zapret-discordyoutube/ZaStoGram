@@ -17,6 +17,28 @@ _SETTINGS_SCREEN_COUNTER = 0
 CANCEL_SENTINEL = "__zasto_cancel__"
 
 
+def _report_click_error(plugin_id, where):
+    """A plugin's button handler raised: log the traceback to FileLog and tell the user.
+
+    traceback.print_exc() only reaches logcat, so a broken handler looked like a button
+    that plays its ripple and does nothing, with no trace in the app's own log.
+    """
+    text = traceback.format_exc()
+    try:
+        from org.telegram.messenger import FileLog
+        FileLog.e("[plugin:" + str(plugin_id) + "] " + where + "\n" + text)
+    except Exception:
+        traceback.print_exc()
+    try:
+        from ui.bulletin import BulletinHelper
+        inst = _INSTANCES.get(plugin_id)
+        name = (getattr(inst, "name", None) or plugin_id) if inst is not None else plugin_id
+        last = text.strip().splitlines()[-1] if text.strip() else "error"
+        BulletinHelper.show_error(f"Плагин «{name}»: {last}")
+    except Exception:
+        traceback.print_exc()
+
+
 def configure(requirements_dir):
     """Configure the writable cache used by plugin ``__requirements__``."""
     from _plugin_requirements import configure as configure_requirements
@@ -165,7 +187,7 @@ def create_sub_settings(plugin_id, screen_token, index):
     try:
         nested_items = list(factory() or [])
     except Exception:
-        traceback.print_exc()
+        _report_click_error(plugin_id, "create_sub_fragment")
         return result
     _SETTINGS_SCREEN_COUNTER += 1
     token = f"{plugin_id}:{_SETTINGS_SCREEN_COUNTER}"
@@ -197,7 +219,7 @@ def on_setting_change(plugin_id, key, value, screen_token=None):
                 try:
                     callback(value)
                 except Exception:
-                    traceback.print_exc()
+                    _report_click_error(plugin_id, "on_change")
             break
 
 
@@ -209,7 +231,7 @@ def on_setting_click(plugin_id, index, view=None, screen_token=None):
             try:
                 callback(view)
             except Exception:
-                traceback.print_exc()
+                _report_click_error(plugin_id, "on_click")
 
 
 # ------------------------------------------------------------------ request hook bridge
@@ -481,5 +503,5 @@ def invoke_menu_item(plugin_id, item_id, context=None):
                 try:
                     cb(ctx)
                 except Exception:
-                    traceback.print_exc()
+                    _report_click_error(plugin_id, "menu_item.on_click")
             return
