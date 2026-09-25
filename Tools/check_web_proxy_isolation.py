@@ -409,8 +409,11 @@ def main() -> int:
     link_helper = LINK_HELPER.read_text(encoding="utf-8")
     require('"tg://webproxy?"' in link_helper and '"t.me/webproxy?"' in link_helper,
             "tg://webproxy and t.me/webproxy links must be recognised")
-    require("WebProxyTransport.isValidSecret(secret)" in link_helper,
-            "WEB links must carry a valid plain MTProxy secret")
+    # 12.10.4: a WEB proxy address may carry a path, and its link then marks
+    # the secret; ProxySettings.webProxy validates host, path and both secret
+    # forms the way upstream does, so the link helper goes through it.
+    require("ProxySettings.webProxy(address, secret)" in link_helper,
+            "WEB links must carry a valid MTProxy secret (plain, or marked for a path)")
 
     shared_config = SHARED_CONFIG.read_text(encoding="utf-8")
     require("PROXY_SCHEMA_V5" in shared_config and "version >= PROXY_SCHEMA_V5" in shared_config,

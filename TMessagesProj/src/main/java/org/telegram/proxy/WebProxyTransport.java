@@ -34,6 +34,7 @@ import org.telegram.messenger.BuildVars;
 import org.telegram.messenger.FileLog;
 import org.telegram.ui.Components.ForegroundDetector;
 
+import java.io.ByteArrayInputStream;
 import java.net.IDN;
 import java.nio.charset.StandardCharsets;
 import java.security.SecureRandom;
@@ -80,7 +81,10 @@ public final class WebProxyTransport implements ForegroundDetector.Listener, Web
     private static volatile WebProxyTransport instance;
     private static WebProxyTransport connectionTestInstance;
 
+    private final String address;
     private final String host;
+    private final String path;
+    private final String bridgePath;
     private final String secret;
     private final String origin;
     private final String bridgeUrl;
@@ -163,14 +167,14 @@ public final class WebProxyTransport implements ForegroundDetector.Listener, Web
         }
     }
 
-    public static int start(String host, String secret) {
-        String normalized = normalizeHost(host);
+    public static int start(String address, String secret) {
+        Address normalized = normalizeAddress(address);
         byte[] secretBytes = decodeSecret(secret);
-        if (TextUtils.isEmpty(normalized) || secretBytes == null || !isSupported()) {
+        if (normalized == null || secretBytes == null || !isSupported()) {
             return 0;
         }
         synchronized (staticLock) {
-            if (instance != null && instance.host.equals(normalized) && instance.secret.equals(secret)) {
+            if (instance != null && instance.address.equals(normalized.value) && instance.secret.equals(secret)) {
                 return instance.engine.port();
             }
             if (instance != null) {
@@ -192,10 +196,13 @@ public final class WebProxyTransport implements ForegroundDetector.Listener, Web
         }
     }
 
-    public static int getActiveLocalPort(String host, String secret) {
-        String normalized = normalizeHost(host);
+    public static int getActiveLocalPort(String address, String secret) {
+        Address normalized = normalizeAddress(address);
+        if (normalized == null) {
+            return 0;
+        }
         synchronized (staticLock) {
-            if (instance != null && instance.host.equals(normalized) && instance.secret.equals(secret)) {
+            if (instance != null && instance.address.equals(normalized.value) && instance.secret.equals(secret)) {
                 return instance.engine.port();
             }
         }
@@ -248,10 +255,10 @@ public final class WebProxyTransport implements ForegroundDetector.Listener, Web
         return target.engine.receiveWait(localPort, waitStartedAt);
     }
 
-    public static int startConnectionCheck(String host, String secret, ReadyCallback readyCallback) {
-        String normalized = normalizeHost(host);
+    public static int startConnectionCheck(String address, String secret, ReadyCallback readyCallback) {
+        Address normalized = normalizeAddress(address);
         byte[] secretBytes = decodeSecret(secret);
-        if (TextUtils.isEmpty(normalized) || secretBytes == null || !isSupported()) {
+        if (normalized == null || secretBytes == null || !isSupported()) {
             return 0;
         }
         synchronized (staticLock) {
@@ -327,18 +334,62 @@ public final class WebProxyTransport implements ForegroundDetector.Listener, Web
         return value;
     }
 
-    private WebProxyTransport(String host, String secret, byte[] secretBytes) throws Exception {
-        this.host = host;
+    private static Address normalizeAddress(String value) {
+        if (value == null) {
+            return null;
+        }
+        int slash = value.indexOf('/');
+        String host = normalizeHost(slash >= 0 ? value.substring(0, slash) : value);
+        String path = slash >= 0 ? value.substring(slash + 1) : "";
+        if (TextUtils.isEmpty(host) || !isValidPath(path)) {
+            return null;
+        }
+        return new Address(host, path);
+    }
+
+    private static boolean isValidPath(String value) {
+        if (value.length() > 128) {
+            return false;
+        }
+        if (value.isEmpty()) {
+            return true;
+        }
+        String[] segments = value.split("/", -1);
+        for (String segment : segments) {
+            if (segment.isEmpty() || !Character.isLetterOrDigit(segment.charAt(0))) {
+                return false;
+            }
+            for (int i = 0; i < segment.length(); i++) {
+                char c = segment.charAt(i);
+                if (!(c >= 'A' && c <= 'Z')
+                        && !(c >= 'a' && c <= 'z')
+                        && !(c >= '0' && c <= '9')
+                        && c != '_'
+                        && c != '-') {
+                    return false;
+                }
+            }
+        }
+        return true;
+    }
+
+    private WebProxyTransport(Address address, String secret, byte[] secretBytes) throws Exception {
+        this.address = address.value;
+        this.host = address.host;
+        this.path = address.path;
+        bridgePath = path.isEmpty() ? "/" : "/" + path + "/";
         this.secret = secret;
         origin = "https://" + host;
         androidNonce = randomToken(32);
-        String context = "tdesktop-web-proxy-bridge-v1\n" + host;
+        String context = path.isEmpty()
+                ? "tdesktop-web-proxy-bridge-v1\n" + host
+                : "tdesktop-web-proxy-bridge-v2\n" + host + "\n" + path;
         Mac hmac = Mac.getInstance("HmacSHA256");
         hmac.init(new SecretKeySpec(secretBytes, "HmacSHA256"));
         String capability = Base64.encodeToString(
                 hmac.doFinal(context.getBytes(StandardCharsets.UTF_8)),
                 Base64.URL_SAFE | Base64.NO_PADDING | Base64.NO_WRAP);
-        bridgeUrl = origin + "/?bridge=" + capability + "#android=" + androidNonce;
+        bridgeUrl = origin + bridgePath + "?bridge=" + capability + "#android=" + androidNonce;
         engine = new WebProxyEngine(this);
     }
 
@@ -563,7 +614,18 @@ public final class WebProxyTransport implements ForegroundDetector.Listener, Web
         view.setWebViewClient(new WebViewClient() {
             @Override
             public boolean shouldOverrideUrlLoading(WebView current, WebResourceRequest request) {
-                return request.isForMainFrame() && !isBridgeNavigation(request.getUrl());
+                return !request.isForMainFrame() || !isBridgeNavigation(request.getUrl());
+            }
+
+            @Override
+            public WebResourceResponse shouldInterceptRequest(WebView current, WebResourceRequest request) {
+                Uri url = request.getUrl();
+                if (("http".equalsIgnoreCase(url.getScheme()) || "https".equalsIgnoreCase(url.getScheme()))
+                        && !isAllowedNetworkRequest(url)) {
+                    return new WebResourceResponse("text/plain", "UTF-8",
+                            new ByteArrayInputStream(new byte[0]));
+                }
+                return null;
             }
 
             @Override
@@ -649,13 +711,30 @@ public final class WebProxyTransport implements ForegroundDetector.Listener, Web
     }
 
     private boolean isBridgeNavigation(Uri value) {
-        return value != null
-                && "https".equals(value.getScheme())
-                && host.equals(value.getHost())
+        return value != null && bridgeUrl.equals(value.toString());
+    }
+
+    private boolean isAllowedNetworkRequest(Uri value) {
+        String requestPath = value.getPath();
+        return "https".equalsIgnoreCase(value.getScheme())
+                && host.equalsIgnoreCase(value.getHost())
+                && value.getUserInfo() == null
+                && (value.getPort() == -1 || value.getPort() == 443)
+                && requestPath != null
+                && requestPath.startsWith(bridgePath);
+    }
+
+    private boolean isCurrentBridgeDocument(WebView source) {
+        String currentUrl = source.getUrl();
+        if (currentUrl == null) {
+            return false;
+        }
+        Uri value = Uri.parse(currentUrl);
+        return "https".equalsIgnoreCase(value.getScheme())
+                && host.equalsIgnoreCase(value.getHost())
+                && value.getUserInfo() == null
                 && value.getPort() == -1
-                && "/".equals(value.getPath())
-                && value.getQueryParameterNames().size() == 1
-                && value.getQueryParameterNames().contains("bridge");
+                && bridgePath.equals(value.getPath());
     }
 
     private void onWebMessage(
@@ -664,7 +743,12 @@ public final class WebProxyTransport implements ForegroundDetector.Listener, Web
             Uri sourceOrigin,
             boolean isMainFrame,
             JavaScriptReplyProxy sourceReplyProxy) {
-        if (stopped || sourceView != webView || !isMainFrame || !origin.equals(sourceOrigin.toString())) {
+        if (stopped
+                || sourceView != webView
+                || !isMainFrame
+                || sourceOrigin == null
+                || !origin.equals(sourceOrigin.toString())
+                || !isCurrentBridgeDocument(sourceView)) {
             return;
         }
         if (message.getType() == WebMessageCompat.TYPE_ARRAY_BUFFER) {
@@ -857,5 +941,17 @@ public final class WebProxyTransport implements ForegroundDetector.Listener, Web
         byte[] bytes = new byte[size];
         new SecureRandom().nextBytes(bytes);
         return Base64.encodeToString(bytes, Base64.URL_SAFE | Base64.NO_PADDING | Base64.NO_WRAP);
+    }
+
+    private static final class Address {
+        private final String host;
+        private final String path;
+        private final String value;
+
+        private Address(String host, String path) {
+            this.host = host;
+            this.path = path;
+            value = path.isEmpty() ? host : host + "/" + path;
+        }
     }
 }

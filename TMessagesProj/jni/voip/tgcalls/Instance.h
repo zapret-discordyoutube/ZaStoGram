@@ -1,6 +1,7 @@
 #ifndef TGCALLS_INSTANCE_H
 #define TGCALLS_INSTANCE_H
 
+#include <cstdint>
 #include <functional>
 #include <vector>
 #include <string>
@@ -9,8 +10,6 @@
 
 #include "Stats.h"
 #include "DirectConnectionChannel.h"
-
-#include "platform/PlatformInterface.h"
 
 namespace rtc {
 template <typename VideoFrameT>
@@ -138,8 +137,8 @@ struct EncryptionKey {
 
     EncryptionKey(
 		std::shared_ptr<std::array<uint8_t, kSize>> value,
-		bool isOutgoing
-    ): value(value), isOutgoing(isOutgoing) {
+		bool isOutgoing)
+	: value(value), isOutgoing(isOutgoing) {
     }
 };
 
@@ -247,8 +246,6 @@ struct Descriptor {
     std::string initialInputDeviceId;
     std::string initialOutputDeviceId;
     std::shared_ptr<DirectConnectionChannel> directConnectionChannel;
-
-	std::shared_ptr<PlatformContext> platformContext;
 };
 
 class Meta {

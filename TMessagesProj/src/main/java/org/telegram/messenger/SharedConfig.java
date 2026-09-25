@@ -1722,7 +1722,6 @@ public class SharedConfig {
             editor.putInt("proxy_type", 0);
             editor.putInt("proxy_port", 1080);
             editor.putBoolean("proxy_enabled", false);
-            editor.putBoolean("proxy_enabled_calls", false);
             editor.apply();
             if (enabled) {
                 ConnectionsManager.setProxySettings(false, null, ProxyConnectionEvent.Origin.SETTINGS_CHANGE);

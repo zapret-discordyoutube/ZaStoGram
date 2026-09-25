@@ -183,13 +183,13 @@ public final class ProxyLinkHelper {
             }
         }
         if (type == TYPE_WEB) {
-            // WEB proxy: an HTTPS hostname plus a plain 16-byte (or dd) MTProxy
-            // secret; the link carries no port.
-            address = WebProxyTransport.normalizeHost(address);
-            if (TextUtils.isEmpty(address) || !WebProxyTransport.isValidSecret(secret)) {
+            // WEB proxy: an HTTPS host with an optional path plus an MTProxy
+            // secret (marked when a path is present); the link carries no port.
+            ProxySettings web = ProxySettings.webProxy(address, secret);
+            if (web == null) {
                 return null;
             }
-            return new ProxyLink(type, address, 0, "", "", secret);
+            return new ProxyLink(type, web.getAddress(), 0, "", "", web.getSecret());
         }
         int port = Utilities.parseInt(portString);
         if (TextUtils.isEmpty(address) || port <= 0 || port > 65535) {

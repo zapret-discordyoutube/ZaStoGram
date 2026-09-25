@@ -228,7 +228,7 @@ public class ProxySettingsActivity extends BaseFragment {
                     final String address = inputFields[FIELD_IP].getText().toString();
                     currentProxyInfo.settings = ProxySettings.builder()
                             .setType(ProxyLinkHelper.toSettingsType(currentType))
-                            .setAddress(currentType == TYPE_WEB ? WebProxyTransport.normalizeHost(address) : address)
+                            .setAddress(address)
                             .setPort(currentType == TYPE_WEB ? 0 : Utilities.parseInt(inputFields[FIELD_PORT].getText().toString()))
                             .setUser(currentType == TYPE_SOCKS5 ? inputFields[FIELD_USER].getText().toString() : "")
                             .setPassword(currentType == TYPE_SOCKS5 ? inputFields[FIELD_PASSWORD].getText().toString() : "")
@@ -732,9 +732,8 @@ public class ProxySettingsActivity extends BaseFragment {
             return;
         }
         boolean enabled = currentType == TYPE_WEB
-                ? !TextUtils.isEmpty(WebProxyTransport.normalizeHost(inputFields[FIELD_IP].getText().toString()))
-                    && inputFields[FIELD_SECRET] != null
-                    && WebProxyTransport.isValidSecret(inputFields[FIELD_SECRET].getText().toString())
+                ? inputFields[FIELD_SECRET] != null
+                    && ProxySettings.webProxy(inputFields[FIELD_IP].getText().toString(), inputFields[FIELD_SECRET].getText().toString()) != null
                 : inputFields[FIELD_IP].length() != 0
                     && Utilities.parseInt(inputFields[FIELD_PORT].getText().toString()) != 0;
         setShareDoneEnabled(enabled, animated);
