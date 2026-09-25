@@ -24,7 +24,7 @@ import org.telegram.ui.ActionBar.Theme;
 
 // Точная подстройка в меню видео просмотрщика: скорость шагом 0.05x,
 // усиление яркости и громкости. Кнопки ± повторяют шаг при удержании,
-// тап по значению возвращает 100% / 1x.
+// тап по значению возвращает исходное значение.
 public class ZaStoVideoAdjustLayout extends LinearLayout {
 
     public static final float SPEED_STEP = 0.05f;
@@ -138,7 +138,8 @@ public class ZaStoVideoAdjustLayout extends LinearLayout {
 
     private void update() {
         speedRow.valueView.setText(formatSpeed(speed) + "x");
-        brightnessRow.valueView.setText(formatPercent(brightness));
+        int offset = brightnessOffset(brightness);
+        brightnessRow.valueView.setText(offset > 0 ? "+" + offset : "" + offset);
         volumeRow.valueView.setText(formatPercent(volume));
         speedRow.setLimits(speed > ActionBarMenuSlider.SpeedSlider.MIN_SPEED + 0.001f, speed < ActionBarMenuSlider.SpeedSlider.MAX_SPEED - 0.001f);
         brightnessRow.setLimits(brightness > BRIGHTNESS_MIN + 0.001f, brightness < BRIGHTNESS_MAX - 0.001f);
@@ -175,13 +176,25 @@ public class ZaStoVideoAdjustLayout extends LinearLayout {
         return Math.max(VOLUME_MIN, Math.min(VOLUME_MAX, prefs().getFloat("volume", 1f)));
     }
 
-    // Краска слоя для TextureView: умножает RGB на коэффициент усиления.
+    // Сдвиг яркости как Legacy Brightness в Photoshop: ко всем каналам прибавляется
+    // одно и то же смещение, поэтому тени поднимаются так же, как света.
+    // Шаг 0.1 даёт ±10 из 255: от -50 до +150, как предел Legacy в Photoshop.
+    public static int brightnessOffset(float gain) {
+        return Math.round((gain - 1f) * 100f);
+    }
+
+    // Краска слоя для TextureView: сдвигает RGB на смещение яркости.
     public static Paint createBrightnessPaint(float gain) {
-        if (Math.abs(gain - 1f) < 0.001f) {
+        int offset = brightnessOffset(gain);
+        if (offset == 0) {
             return null;
         }
-        ColorMatrix matrix = new ColorMatrix();
-        matrix.setScale(gain, gain, gain, 1f);
+        ColorMatrix matrix = new ColorMatrix(new float[] {
+                1, 0, 0, 0, offset,
+                0, 1, 0, 0, offset,
+                0, 0, 1, 0, offset,
+                0, 0, 0, 1, 0
+        });
         Paint paint = new Paint();
         paint.setColorFilter(new ColorMatrixColorFilter(matrix));
         return paint;
