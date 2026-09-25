@@ -93,10 +93,10 @@ constexpr uint32_t kRouteFailuresBeforeSuppress = 3;
 // пары минут дороже, чем лишний раз проверить релей.
 constexpr int64_t kRouteSuppressTtlMs = 2 * 60 * 1000;
 // A throttled network freezes TCP to Cloudflare after about 16 KB downstream
-// (logs (9) and (10): no tunnel session ever got past 15 KB). A tunnel socket
-// that stalls with requests pending before this much arrived is frozen, not
-// merely slow.
-constexpr uint64_t kTunnelFreezeBytes = 20 * 1024;
+// (logs (9) and (10): no tunnel session ever got past 15 KB). Connections are
+// replaced after one 8 KB part (ConnectionSocket WSS_TUNNEL_ROTATE_BYTES), so
+// a tunnel that delivered this much is working, even if it would freeze later.
+constexpr uint64_t kTunnelProofBytes = 6 * 1024;
 // На старте десятки соединений всех аккаунтов открываются разом, и их
 // таймауты приходят пачкой. Одна пачка — один провал, а не «три подряд».
 constexpr int64_t kRouteFailureCoalesceMs = 2000;
@@ -804,7 +804,7 @@ bool Socket::parseFrames(std::vector<std::vector<uint8_t>> &payloads, std::strin
     // его доказательство — объём больше порога заморозки, иначе первый же
     // ответ сбрасывал счётчик заморозок и туннель не отключался никогда.
     if (!reachableRecorded && phase == transport::HandshakePhase::FirstDataReceived
-            && (!routeConfig.tunnel || bytesIn >= kTunnelFreezeBytes)) {
+            && (!routeConfig.tunnel || bytesIn >= kTunnelProofBytes)) {
         reachableRecorded = true;
         recordRouteReachable(routeConfig);
     }
@@ -935,14 +935,14 @@ void Socket::timedOut() {
     }
     if (!isReady()) {
         noteAttemptFailed();
-    } else if (routeConfig.tunnel && !speculative && bytesIn < kTunnelFreezeBytes) {
-        // The connection gave up waiting for answers to pending requests on a
-        // tunnel socket that has barely received anything: the network froze
-        // it. Counting it lets the tunnel be suppressed so the DC goes back to
-        // its relay or a direct connection instead of dying here repeatedly.
+    } else if (routeConfig.tunnel && !speculative && bytesIn == 0) {
+        // The tunnel upgraded and then delivered nothing at all. A tunnel that
+        // froze after some data is throttled, not dead: suppressing it sent
+        // DC1/DC5 media to direct TCP, which the same network blocks outright
+        // (desktop log 25.09), and nothing loaded for two minutes.
         recordRouteUnreachable(routeConfig);
         if (LOGS_ENABLED) {
-            DEBUG_D("wss_socket tunnel_stalled rx=%llu", (unsigned long long) bytesIn);
+            DEBUG_D("wss_socket tunnel_silent");
         }
     }
 }

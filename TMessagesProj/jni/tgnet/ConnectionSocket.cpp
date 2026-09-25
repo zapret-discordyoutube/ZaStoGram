@@ -26,6 +26,7 @@
 #include <cstdio>
 #include <cstring>
 #include <map>
+#include <mutex>
 #include <utility>
 #include <vector>
 #include <openssl/bn.h>
@@ -156,6 +157,7 @@
 #define outgoingWssPacketSizes stateMachine.wss.outgoingPacketSizes
 #define wssFirstFrameSentTime stateMachine.wss.firstFrameSentTime
 #define wssOpenTime stateMachine.wss.openTime
+#define wssTunnelRotating stateMachine.wss.tunnelRotating
 #define proxyAuthState stateMachine.socks.proxyAuthState
 #define proxyHandshakeAdmissionTimer stateMachine.admission.timer
 #define proxyHandshakeAdmissionQueued stateMachine.admission.queued
@@ -209,6 +211,34 @@ static constexpr int64_t WSS_TCP_CONNECT_TIMEOUT_MS = 2500;
 // much, so that one more answer (downloads over the tunnel ask for 8 KB parts)
 // still fits under the freeze.
 static constexpr uint64_t WSS_TUNNEL_ROTATE_BYTES = 6 * 1024;
+
+// Every tunnel connection lives for one part, so a line per rotation would
+// flood the log; they are summed up and reported every 32 or once a minute.
+static void noteWssTunnelRotated(uint64_t received) {
+    static std::mutex mutex;
+    static uint32_t count = 0;
+    static uint64_t bytes = 0;
+    static int64_t since = 0;
+    uint32_t reportCount;
+    uint64_t reportBytes;
+    {
+        std::lock_guard<std::mutex> lock(mutex);
+        const int64_t now = ConnectionsManager::getInstance(0).getCurrentTimeMonotonicMillis();
+        if (count == 0) {
+            since = now;
+        }
+        count++;
+        bytes += received;
+        if (count < 32 && now - since < 60 * 1000) {
+            return;
+        }
+        reportCount = count;
+        reportBytes = bytes;
+        count = 0;
+        bytes = 0;
+    }
+    if (LOGS_ENABLED) DEBUG_D("wss_tunnel_rotated sockets=%u rx=%llu", reportCount, (unsigned long long) reportBytes);
+}
 static constexpr int64_t MT_PROXY_EARLY_APPDATA_DROP_MS = 2 * 60 * 1000;
 
 // WEB proxy receive-wait reasons by WebProxyFlow.REASON_* value; the numbers
@@ -4579,6 +4609,11 @@ void ConnectionSocket::closeStepLogDisconnect(int32_t reason, int32_t error, con
         return;
     }
     if (currentTransportWss) {
+        if (wssTunnelRotating) {
+            wssTunnelRotating = false;
+            noteWssTunnelRotated(currentWssTransport != nullptr ? currentWssTransport->receivedBytes() : 0);
+            return;
+        }
         if (LOGS_ENABLED) {
             const std::string session = currentWssTransport != nullptr ? currentWssTransport->takeSessionSummary() : std::string();
             DEBUG_D("connection(%p) wss_disconnect account%d dc%d media=%d reason=%d reason_text=%s error=%d error_text=%s phase=%s transport_state=%s epoll_registered=%d %s", this, (int) instanceNum, (int) currentDatacenterId, currentMediaConnection ? 1 : 0, reason, mtProxyDisconnectReasonName(reason), error, mtProxySocketErrorName(error), proxyCheckDiagnostic.c_str(), transportStateName(currentTransportState), epollRegistered ? 1 : 0, session.c_str());
@@ -4719,7 +4754,7 @@ void ConnectionSocket::onEvent(uint32_t events) {
                 && currentWssRoute.tunnel
                 && currentWssTransport->receivedBytes() >= WSS_TUNNEL_ROTATE_BYTES
                 && !hasPartialIncomingPacket()) {
-            if (LOGS_ENABLED) DEBUG_D("connection(%p) wss_tunnel_rotate rx=%llu", this, (unsigned long long) currentWssTransport->receivedBytes());
+            wssTunnelRotating = true;
             closeSocket(0, 0);
             return;
         }

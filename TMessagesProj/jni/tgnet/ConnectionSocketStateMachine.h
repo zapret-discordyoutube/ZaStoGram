@@ -146,6 +146,8 @@ public:
         bool mediaConnection = false;
         tgnet::wss::Route route;
         std::unique_ptr<tgnet::transport::Socket> transport;
+        // Closed on purpose after one part through the throttled tunnel.
+        bool tunnelRotating = false;
         // Outgoing bytes live in the shared outgoingByteStream, but the relay
         // handles only the FIRST MTProto packet of each WebSocket frame and
         // silently drops the rest, so the stream must be cut back into frames
