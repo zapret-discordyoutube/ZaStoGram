@@ -3061,6 +3061,13 @@ void ConnectionsManager::processRequestQueue(uint32_t connectionTypes, uint32_t 
                     } else {
                         retryMax = 6;
                     }
+                    // Through the tunnel every connection is replaced after one
+                    // part and the requests still on it are sent again; six
+                    // resends failed whole files (logs (21): RETRY_LIMIT on a
+                    // 35 KB zip and a 3.5 MB video right after the switch).
+                    if (isDatacenterTunneled((uint32_t) datacenterId, true) || isDatacenterTunneled((uint32_t) datacenterId, false)) {
+                        retryMax = 30;
+                    }
                     if (request->retryCount >= retryMax && !request->premiumFloodWait) {
                         if (LOGS_ENABLED) DEBUG_E("timed out %s (%d/%d), req_id = %d, message_id = 0x%" PRIx64, typeInfo.name(), request->retryCount, retryMax, request->requestToken, request->messageId);
                         auto error = new TL_error();
@@ -4157,6 +4164,9 @@ void ConnectionsManager::init(uint32_t version, int32_t layer, int32_t apiId, st
 
     if (!currentConfigPath.empty() && currentConfigPath.find_last_of('/') != currentConfigPath.size() - 1) {
         currentConfigPath += "/";
+    }
+    if (instanceNum == 0 && !currentConfigPath.empty()) {
+        tgnet::wss::SetRouteHealthPath(currentConfigPath + "wss_route_health.txt");
     }
 
     if (!logPath.empty()) {

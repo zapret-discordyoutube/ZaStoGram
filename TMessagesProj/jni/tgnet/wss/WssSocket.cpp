@@ -24,6 +24,7 @@
 #include <cctype>
 #include <cerrno>
 #include <cstring>
+#include <cstdio>
 #include <map>
 #include <mutex>
 
@@ -120,8 +121,40 @@ struct RouteHealth {
     uint32_t suppressions = 0;
 };
 constexpr int64_t kRouteSuppressMaxTtlMs = 30 * 60 * 1000;
+// Suppression lived only in memory, so every launch probed a blocked relay
+// again: logs (21) spent the first 9 s of DC1 on kws1-1 before the tunnel.
+// Kept in a file; what is restored after a restart is capped, since the
+// phone may be on another network by then.
+constexpr int64_t kRouteSuppressRestoreMaxMs = 10 * 60 * 1000;
+std::string routeHealthPath;
+
+int64_t wallMillis() {
+    return std::chrono::duration_cast<std::chrono::milliseconds>(
+            std::chrono::system_clock::now().time_since_epoch()).count();
+}
 
 std::map<std::string, RouteHealth> routeHealth;
+
+// Called with relayPreferencesMutex held.
+void saveRouteHealthLocked() {
+    if (routeHealthPath.empty()) {
+        return;
+    }
+    FILE *file = fopen(routeHealthPath.c_str(), "w");
+    if (file == nullptr) {
+        return;
+    }
+    const int64_t now = monotonicMillis();
+    const int64_t wall = wallMillis();
+    for (const auto &[domain, health] : routeHealth) {
+        if (health.suppressions == 0 || health.suppressedUntil <= now) {
+            continue;
+        }
+        fprintf(file, "%s %u %lld\n", domain.c_str(), health.suppressions,
+                (long long) (wall + (health.suppressedUntil - now)));
+    }
+    fclose(file);
+}
 std::map<std::string, int64_t> tcpSuccessByAddress;
 
 void recordTcpConnected(const std::string &address) {
@@ -184,6 +217,7 @@ void recordRouteUnreachable(const Route &route) {
         const int64_t ttl = std::min(kRouteSuppressTtlMs << std::min(health.suppressions, 4u), kRouteSuppressMaxTtlMs);
         ++health.suppressions;
         health.suppressedUntil = now + ttl;
+        saveRouteHealthLocked();
         if (LOGS_ENABLED) {
             DEBUG_D("wss_route suppressed domain=%s for_ms=%lld next=%s", route.domain.c_str(),
                     (long long) ttl, route.tunnel ? "direct" : "tunnel");
@@ -197,10 +231,44 @@ void recordRouteReachable(const Route &route) {
     if (LOGS_ENABLED && (health.consecutiveFailures != 0 || health.suppressedUntil != 0)) {
         DEBUG_D("wss_route restored domain=%s reason=data", route.domain.c_str());
     }
+    const bool persisted = health.suppressions != 0;
     health.consecutiveFailures = 0;
     health.suppressedUntil = 0;
     health.lastFailureAt = 0;
     health.suppressions = 0;
+    if (persisted) {
+        saveRouteHealthLocked();
+    }
+}
+
+void loadRouteHealthFrom(const std::string &path) {
+    std::lock_guard<std::mutex> lock(relayPreferencesMutex);
+    if (!routeHealthPath.empty() || path.empty()) {
+        return;
+    }
+    routeHealthPath = path;
+    FILE *file = fopen(path.c_str(), "r");
+    if (file == nullptr) {
+        return;
+    }
+    const int64_t now = monotonicMillis();
+    const int64_t wall = wallMillis();
+    char domain[256];
+    unsigned suppressions = 0;
+    long long until = 0;
+    while (fscanf(file, "%255s %u %lld", domain, &suppressions, &until) == 3) {
+        const int64_t left = std::min<int64_t>(until - wall, kRouteSuppressRestoreMaxMs);
+        if (left <= 0 || suppressions == 0) {
+            continue;
+        }
+        RouteHealth &health = routeHealth[domain];
+        health.suppressions = suppressions;
+        health.suppressedUntil = now + left;
+        if (LOGS_ENABLED) {
+            DEBUG_D("wss_route suppressed domain=%s for_ms=%lld restored_from_disk=1", domain, (long long) left);
+        }
+    }
+    fclose(file);
 }
 
 void recordAttemptFailed(const Route &route) {
@@ -321,6 +389,10 @@ const char *officialRelayIpForDc(int32_t dcId) {
 }
 
 } // namespace
+
+void SetRouteHealthPath(const std::string &path) {
+    loadRouteHealthFrom(path);
+}
 
 static bool TunnelRoute(const std::string &dcAddress, Route *route) {
     struct in_addr parsed;

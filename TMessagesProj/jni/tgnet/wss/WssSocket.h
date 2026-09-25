@@ -43,6 +43,9 @@ bool RouteUsable(const Route &route);
 // Whether OfficialRoute would carry this DC through the Cloudflare tunnel now.
 bool DatacenterTunneled(int32_t dcId, bool mediaConnection, bool testBackend);
 
+// Keeps relay suppression across launches in this file (read once).
+void SetRouteHealthPath(const std::string &path);
+
 class Socket final : public transport::Socket {
 public:
     explicit Socket(Route route);
