@@ -113,7 +113,13 @@ struct RouteHealth {
     uint32_t consecutiveFailures = 0;
     int64_t suppressedUntil = 0;
     int64_t lastFailureAt = 0;
+    // Suppressions in a row without a single answer in between. A relay the
+    // network blocks outright (kws1 on the user's networks) was probed again
+    // every two minutes, and each probe left DC1 without a connection for
+    // seconds (desktop log 25.09). Each repeat doubles the suppression.
+    uint32_t suppressions = 0;
 };
+constexpr int64_t kRouteSuppressMaxTtlMs = 30 * 60 * 1000;
 
 std::map<std::string, RouteHealth> routeHealth;
 std::map<std::string, int64_t> tcpSuccessByAddress;
@@ -175,10 +181,12 @@ void recordRouteUnreachable(const Route &route) {
                 health.consecutiveFailures, kRouteFailuresBeforeSuppress);
     }
     if (health.consecutiveFailures >= kRouteFailuresBeforeSuppress) {
-        health.suppressedUntil = now + kRouteSuppressTtlMs;
+        const int64_t ttl = std::min(kRouteSuppressTtlMs << std::min(health.suppressions, 4u), kRouteSuppressMaxTtlMs);
+        ++health.suppressions;
+        health.suppressedUntil = now + ttl;
         if (LOGS_ENABLED) {
             DEBUG_D("wss_route suppressed domain=%s for_ms=%lld next=%s", route.domain.c_str(),
-                    (long long) kRouteSuppressTtlMs, route.tunnel ? "direct" : "tunnel");
+                    (long long) ttl, route.tunnel ? "direct" : "tunnel");
         }
     }
 }
@@ -192,6 +200,7 @@ void recordRouteReachable(const Route &route) {
     health.consecutiveFailures = 0;
     health.suppressedUntil = 0;
     health.lastFailureAt = 0;
+    health.suppressions = 0;
 }
 
 void recordAttemptFailed(const Route &route) {
