@@ -4168,6 +4168,7 @@ void ConnectionsManager::init(uint32_t version, int32_t layer, int32_t apiId, st
     if (instanceNum == 0 && !currentConfigPath.empty()) {
         tgnet::wss::SetRouteHealthPath(currentConfigPath + "wss_route_health.txt");
     }
+    tgnet::wss::SetNetworkType(networkType);
 
     if (!logPath.empty()) {
         LOGS_ENABLED = true;
@@ -4391,6 +4392,7 @@ void ConnectionsManager::setNetworkAvailable(bool value, int32_t type, bool slow
             // Spare sockets belong to the network they were opened on.
             wssPool->clear("network_changed");
         }
+        tgnet::wss::SetNetworkType(type);
         networkAvailable = value;
         currentNetworkType = type;
         networkSlow = slow;

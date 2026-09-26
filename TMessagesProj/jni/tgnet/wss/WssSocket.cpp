@@ -20,6 +20,7 @@
 #include <unistd.h>
 
 #include <algorithm>
+#include <atomic>
 #include <chrono>
 #include <cctype>
 #include <cerrno>
@@ -52,13 +53,28 @@ struct RelayPreference {
 std::mutex relayPreferencesMutex;
 std::map<std::string, RelayPreference> relayPreferences;
 
+// A relay the mobile provider blocks (kws1-1 on the user's phone) works at home
+// on Wi-Fi: with one shared state a failure on mobile data kept Wi-Fi in the
+// tunnel for up to 30 minutes. Everything below is keyed by network type.
+constexpr int32_t kNetworkMobile = 0;
+constexpr int32_t kNetworkWifi = 1;
+std::atomic<int32_t> currentNetwork{kNetworkWifi};
+
+const char *networkName(int32_t network) {
+    return network == kNetworkWifi ? "wifi" : "mobile";
+}
+
+std::string networkKey(int32_t network, const std::string &value) {
+    return std::string(networkName(network)) + "/" + value;
+}
+
 int64_t monotonicMillis() {
     return std::chrono::duration_cast<std::chrono::milliseconds>(
             std::chrono::steady_clock::now().time_since_epoch()).count();
 }
 
 std::string relayPreferenceKey(const Route &route) {
-    return route.relayHost + ":" + std::to_string(route.relayPort) + ":" + route.domain;
+    return networkKey(route.network, route.relayHost + ":" + std::to_string(route.relayPort) + ":" + route.domain);
 }
 
 bool hasFallback(const Route &route) {
@@ -157,26 +173,26 @@ void saveRouteHealthLocked() {
 }
 std::map<std::string, int64_t> tcpSuccessByAddress;
 
-void recordTcpConnected(const std::string &address) {
+void recordTcpConnected(int32_t network, const std::string &address) {
     if (address.empty()) {
         return;
     }
     std::lock_guard<std::mutex> lock(relayPreferencesMutex);
-    tcpSuccessByAddress[address] = monotonicMillis();
+    tcpSuccessByAddress[networkKey(network, address)] = monotonicMillis();
 }
 
-bool tcpRecentlyConnected(const std::string &address) {
+bool tcpRecentlyConnected(int32_t network, const std::string &address) {
     if (address.empty()) {
         return false;
     }
     std::lock_guard<std::mutex> lock(relayPreferencesMutex);
-    auto it = tcpSuccessByAddress.find(address);
+    auto it = tcpSuccessByAddress.find(networkKey(network, address));
     return it != tcpSuccessByAddress.end() && monotonicMillis() - it->second < kRecentTcpSuccessMs;
 }
 
-bool routeSuppressed(const std::string &domain) {
+bool routeSuppressed(int32_t network, const std::string &domain) {
     std::lock_guard<std::mutex> lock(relayPreferencesMutex);
-    auto it = routeHealth.find(domain);
+    auto it = routeHealth.find(networkKey(network, domain));
     if (it == routeHealth.end() || it->second.suppressedUntil == 0) {
         return false;
     }
@@ -184,7 +200,7 @@ bool routeSuppressed(const std::string &domain) {
         it->second.suppressedUntil = 0;
         it->second.consecutiveFailures = 0;
         if (LOGS_ENABLED) {
-            DEBUG_D("wss_route restored domain=%s reason=expired", domain.c_str());
+            DEBUG_D("wss_route restored domain=%s net=%s reason=expired", domain.c_str(), networkName(network));
         }
         return false;
     }
@@ -193,7 +209,7 @@ bool routeSuppressed(const std::string &domain) {
 
 void recordRouteUnreachable(const Route &route) {
     std::lock_guard<std::mutex> lock(relayPreferencesMutex);
-    RouteHealth &health = routeHealth[route.domain];
+    RouteHealth &health = routeHealth[networkKey(route.network, route.domain)];
     const int64_t now = monotonicMillis();
     if (health.suppressedUntil > now) {
         return;
@@ -210,8 +226,8 @@ void recordRouteUnreachable(const Route &route) {
     // основной релей.
     ++health.consecutiveFailures;
     if (LOGS_ENABLED) {
-        DEBUG_D("wss_route failure domain=%s failures=%u/%u", route.domain.c_str(),
-                health.consecutiveFailures, kRouteFailuresBeforeSuppress);
+        DEBUG_D("wss_route failure domain=%s net=%s failures=%u/%u", route.domain.c_str(),
+                networkName(route.network), health.consecutiveFailures, kRouteFailuresBeforeSuppress);
     }
     if (health.consecutiveFailures >= kRouteFailuresBeforeSuppress) {
         const int64_t ttl = std::min(kRouteSuppressTtlMs << std::min(health.suppressions, 4u), kRouteSuppressMaxTtlMs);
@@ -219,17 +235,17 @@ void recordRouteUnreachable(const Route &route) {
         health.suppressedUntil = now + ttl;
         saveRouteHealthLocked();
         if (LOGS_ENABLED) {
-            DEBUG_D("wss_route suppressed domain=%s for_ms=%lld next=%s", route.domain.c_str(),
-                    (long long) ttl, route.tunnel ? "direct" : "tunnel");
+            DEBUG_D("wss_route suppressed domain=%s net=%s for_ms=%lld next=%s", route.domain.c_str(),
+                    networkName(route.network), (long long) ttl, route.tunnel ? "direct" : "tunnel");
         }
     }
 }
 
 void recordRouteReachable(const Route &route) {
     std::lock_guard<std::mutex> lock(relayPreferencesMutex);
-    RouteHealth &health = routeHealth[route.domain];
+    RouteHealth &health = routeHealth[networkKey(route.network, route.domain)];
     if (LOGS_ENABLED && (health.consecutiveFailures != 0 || health.suppressedUntil != 0)) {
-        DEBUG_D("wss_route restored domain=%s reason=data", route.domain.c_str());
+        DEBUG_D("wss_route restored domain=%s net=%s reason=data", route.domain.c_str(), networkName(route.network));
     }
     const bool persisted = health.suppressions != 0;
     health.consecutiveFailures = 0;
@@ -258,14 +274,15 @@ void loadRouteHealthFrom(const std::string &path) {
     long long until = 0;
     while (fscanf(file, "%255s %u %lld", domain, &suppressions, &until) == 3) {
         const int64_t left = std::min<int64_t>(until - wall, kRouteSuppressRestoreMaxMs);
-        if (left <= 0 || suppressions == 0) {
+        // Lines written before the per-network split carry a bare domain.
+        if (left <= 0 || suppressions == 0 || strchr(domain, '/') == nullptr) {
             continue;
         }
         RouteHealth &health = routeHealth[domain];
         health.suppressions = suppressions;
         health.suppressedUntil = now + left;
         if (LOGS_ENABLED) {
-            DEBUG_D("wss_route suppressed domain=%s for_ms=%lld restored_from_disk=1", domain, (long long) left);
+            DEBUG_D("wss_route suppressed key=%s for_ms=%lld restored_from_disk=1", domain, (long long) left);
         }
     }
     fclose(file);
@@ -394,7 +411,14 @@ void SetRouteHealthPath(const std::string &path) {
     loadRouteHealthFrom(path);
 }
 
-static bool TunnelRoute(const std::string &dcAddress, Route *route) {
+void SetNetworkType(int32_t networkType) {
+    const int32_t network = networkType == NETWORK_TYPE_WIFI ? kNetworkWifi : kNetworkMobile;
+    if (currentNetwork.exchange(network) != network && LOGS_ENABLED) {
+        DEBUG_D("wss_route network=%s", networkName(network));
+    }
+}
+
+static bool TunnelRoute(int32_t network, const std::string &dcAddress, Route *route) {
     struct in_addr parsed;
     if (inet_pton(AF_INET, dcAddress.c_str(), &parsed) != 1) {
         return false;
@@ -406,7 +430,8 @@ static bool TunnelRoute(const std::string &dcAddress, Route *route) {
     result.domain = kTunnelHost;
     result.path = std::string(kOfficialPath) + "?dst=" + dcAddress;
     result.tunnel = true;
-    if (routeSuppressed(result.domain)) {
+    result.network = network;
+    if (routeSuppressed(network, result.domain)) {
         return false;
     }
     *route = std::move(result);
@@ -416,13 +441,14 @@ static bool TunnelRoute(const std::string &dcAddress, Route *route) {
 bool OfficialRoute(int32_t dcId, bool mediaConnection, bool testBackend, const std::string &dcAddress, Route *route) {
     if (route != nullptr && !testBackend && dcId == kTunnelOnlyDcId) {
         // DC203 отдаёт медиа аккаунтам без Premium и своего kws-релея не имеет.
-        return TunnelRoute(dcAddress, route);
+        return TunnelRoute(currentNetwork.load(), dcAddress, route);
     }
     const char *relayIp = officialRelayIpForDc(dcId);
     if (route == nullptr || testBackend || dcId < 1 || dcId > 5 || relayIp == nullptr) {
         return false;
     }
     Route result;
+    result.network = currentNetwork.load();
     result.relayHost = relayIp;
     result.relayPort = 443;
     result.path = kOfficialPath;
@@ -431,13 +457,13 @@ bool OfficialRoute(int32_t dcId, bool mediaConnection, bool testBackend, const s
     result.relayHostFallback = result.domain;
     result.viaFallback = preferFallback(result);
     result.connectHost = result.viaFallback ? result.relayHostFallback : result.relayHost;
-    if (routeSuppressed(result.domain)) {
+    if (routeSuppressed(result.network, result.domain)) {
         // Релей этого датацентра недоступен: сначала туннель через Worker, а
         // если недоступен и он, соединение идёт напрямую. Для медиа пробовали
         // и прямой путь первым (logs (13)): 27 попыток к медиа DC1, ни одного
         // TCP-подключения, тогда как задушенный туннель мелкими частями хоть
         // что-то отдаёт.
-        return TunnelRoute(dcAddress, route);
+        return TunnelRoute(result.network, dcAddress, route);
     }
     *route = std::move(result);
     return true;
@@ -450,7 +476,9 @@ bool DatacenterTunneled(int32_t dcId, bool mediaConnection, bool testBackend) {
 }
 
 bool RouteUsable(const Route &route) {
-    return !routeSuppressed(route.domain) && preferFallback(route) == route.viaFallback;
+    return route.network == currentNetwork.load()
+            && !routeSuppressed(route.network, route.domain)
+            && preferFallback(route) == route.viaFallback;
 }
 
 Socket::Socket(Route route) : routeConfig(std::move(route)) {
@@ -535,7 +563,7 @@ bool Socket::finishTcpConnect(std::string *diagnostic) {
         return false;
     }
     phase = transport::HandshakePhase::TcpConnected;
-    recordTcpConnected(peerAddress);
+    recordTcpConnected(routeConfig.network, peerAddress);
     if (LOGS_ENABLED) {
         DEBUG_D("wss_socket tcp_connected domain=%s", routeConfig.domain.c_str());
     }
@@ -1046,7 +1074,7 @@ void Socket::noteAttemptFailed() {
         if (speculative) {
             return;
         }
-        if (phase == transport::HandshakePhase::None && tcpRecentlyConnected(peerAddress)) {
+        if (phase == transport::HandshakePhase::None && tcpRecentlyConnected(routeConfig.network, peerAddress)) {
             // Соседние сокеты к этому адресу только что подключались: провайдер
             // съел SYN одного потока. Новый сокет пройдёт, а переход на запасной
             // адрес или в туннель здесь только навредит.

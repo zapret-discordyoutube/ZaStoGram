@@ -28,7 +28,14 @@ struct Route {
     // The Worker tunnel reaches the DC over plain TCP, where bytes 60..61 of
     // the obfuscation header must name the DC and traffic class.
     bool tunnel = false;
+    // Network the route was chosen on (see SetNetworkType): its failures count
+    // against that network only, even when reported after a switch.
+    int32_t network = 0;
 };
+
+// Wi-Fi and mobile data reach Telegram through different providers, so relay
+// health, suppression and the IP/DNS preference are kept per network type.
+void SetNetworkType(int32_t networkType);
 
 // Telegram's public web relays cover production DC1-DC5. Media connections
 // use the corresponding -1 relay, matching Telegram Web's transport catalog.
@@ -36,8 +43,8 @@ struct Route {
 // ZaStoGram Cloudflare Worker, which opens dcAddress (IPv4) over TCP itself.
 bool OfficialRoute(int32_t dcId, bool mediaConnection, bool testBackend, const std::string &dcAddress, Route *route);
 
-// Whether OfficialRoute would still hand out this exact route: not suppressed
-// and not switched to the relay's DNS name.
+// Whether OfficialRoute would still hand out this exact route: same network,
+// not suppressed and not switched to the relay's DNS name.
 bool RouteUsable(const Route &route);
 
 // Whether OfficialRoute would carry this DC through the Cloudflare tunnel now.
