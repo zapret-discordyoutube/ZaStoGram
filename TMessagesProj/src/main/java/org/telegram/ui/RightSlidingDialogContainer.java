@@ -61,6 +61,9 @@ public abstract class RightSlidingDialogContainer extends FrameLayout {
         this.navigationLayout = navigationLayout;
         if (fragment.onFragmentCreate()) {
             fragment.setInPreviewMode(true);
+            // Ставим до раннего return в ветке без анимаций: иначе стрелка «назад»
+            // в темах уходит в closeLastFragment и закрывает сам список чатов.
+            fragment.setPreviewDelegate(() -> finishPreview());
             fragment.setParentLayout(navigationLayout);
             View view = fragment.performCreateView(getContext());
 
@@ -94,6 +97,7 @@ public abstract class RightSlidingDialogContainer extends FrameLayout {
                     openedProgress = 1f;
                     updateOpenAnimationProgress();
                     openAnimationFinished(false);
+                    ViewCompat.requestApplyInsets(this);
                     return;
                 }
                 notificationsLocker.lock();
@@ -126,7 +130,6 @@ public abstract class RightSlidingDialogContainer extends FrameLayout {
                 openAnimator.start();
             }
 
-            fragment.setPreviewDelegate(() -> finishPreview());
             ViewCompat.requestApplyInsets(this);
         }
     }
