@@ -46,6 +46,7 @@ constexpr const char *kOfficialPath = "/apiws";
 // ZapretGUI (telegram_proxy/proxy/route_catalog.py, TUNNEL_HOSTS).
 constexpr const char *kTunnelHosts[] = {
         "edge.amberwick.workers.dev",
+        "fuckyourkn.copperbrook.workers.dev",
 };
 constexpr size_t kTunnelHostCount = sizeof(kTunnelHosts) / sizeof(kTunnelHosts[0]);
 constexpr int32_t kTunnelOnlyDcId = 203;
