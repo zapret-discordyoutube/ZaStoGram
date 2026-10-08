@@ -37,7 +37,17 @@ namespace wss {
 namespace {
 
 constexpr const char *kOfficialPath = "/apiws";
-constexpr const char *kTunnelHost = "edge.amberwick.workers.dev";
+// Worker tunnels (zastogram-ws-worker/worker.js), each on its own Cloudflare
+// account. A free account serves 100 000 requests a day; past that the worker
+// answers 429 (error code: 1027) until 00:00 UTC, and on 08.10.2026 the single
+// worker was spent by the evening: DC203 media stood still for everyone. Every
+// install starts from a random worker, so the accounts share the load. The
+// same list is in the desktop client (mtproto/proxy/wss/socket.cpp) and in
+// ZapretGUI (telegram_proxy/proxy/route_catalog.py, TUNNEL_HOSTS).
+constexpr const char *kTunnelHosts[] = {
+        "edge.amberwick.workers.dev",
+};
+constexpr size_t kTunnelHostCount = sizeof(kTunnelHosts) / sizeof(kTunnelHosts[0]);
 constexpr int32_t kTunnelOnlyDcId = 203;
 // Size of the MTProto obfuscation header. Measured against the official relays:
 // a first binary frame of 63 bytes never gets a reply, 64 always does.
@@ -339,6 +349,21 @@ void recordRouteUnreachable(const Route &route) {
     if (health.consecutiveFailures >= limit) {
         suppressLocked(route, health, now, "failures");
     }
+}
+
+// The worker answered 429: its account is out of requests for the day, and
+// every further attempt gets the same answer. Suppressed at once, without
+// counting to three, so the next connection goes straight to the next worker.
+void recordTunnelQuotaExhausted(const Route &route) {
+    std::lock_guard<std::mutex> lock(relayPreferencesMutex);
+    RouteHealth &health = routeHealth[networkKey(route.network, healthName(route))];
+    const int64_t now = monotonicMillis();
+    if (health.suppressedUntil > now) {
+        return;
+    }
+    health.lastFailureAt = now;
+    health.consecutiveFailures = 0;
+    suppressLocked(route, health, now, "quota");
 }
 
 // The relay's hardcoded address failed and its DNS fallback failed too, so
@@ -767,24 +792,38 @@ void SetNetworkType(int32_t networkType) {
     }
 }
 
+// Which worker this install tries first; the rest follow in a circle.
+static size_t TunnelStart() {
+    static const size_t start = [] {
+        uint32_t value = 0;
+        RAND_bytes(reinterpret_cast<uint8_t *>(&value), sizeof(value));
+        return static_cast<size_t>(value % kTunnelHostCount);
+    }();
+    return start;
+}
+
 static bool TunnelRoute(int32_t network, const std::string &dcAddress, Route *route) {
     struct in_addr parsed;
     if (inet_pton(AF_INET, dcAddress.c_str(), &parsed) != 1) {
         return false;
     }
-    Route result;
-    result.relayHost = kTunnelHost;
-    result.connectHost = kTunnelHost;
-    result.relayPort = 443;
-    result.domain = kTunnelHost;
-    result.path = std::string(kOfficialPath) + "?dst=" + dcAddress;
-    result.tunnel = true;
-    result.network = network;
-    if (routeSuppressed(network, result.domain)) {
-        return false;
+    for (size_t step = 0; step < kTunnelHostCount; ++step) {
+        const char *host = kTunnelHosts[(TunnelStart() + step) % kTunnelHostCount];
+        if (routeSuppressed(network, host)) {
+            continue;
+        }
+        Route result;
+        result.relayHost = host;
+        result.connectHost = host;
+        result.relayPort = 443;
+        result.domain = host;
+        result.path = std::string(kOfficialPath) + "?dst=" + dcAddress;
+        result.tunnel = true;
+        result.network = network;
+        *route = std::move(result);
+        return true;
     }
-    *route = std::move(result);
-    return true;
+    return false;
 }
 
 static bool CdnRoute(int32_t network, int32_t dcId, Route *route, bool ignoreSuppression = false) {
@@ -1256,6 +1295,9 @@ bool Socket::parseHttpResponse(std::string *diagnostic) {
         if (LOGS_ENABLED) {
             DEBUG_D("wss_socket upgrade_refused domain=%s status=%.12s retries=%u",
                     routeConfig.domain.c_str(), response.c_str(), upgradeRetries);
+        }
+        if (routeConfig.tunnel && !speculative && response.compare(0, 12, "HTTP/1.1 429") == 0) {
+            recordTunnelQuotaExhausted(routeConfig);
         }
         setDiagnostic(diagnostic, "wss_http_upgrade_failed");
         return false;
