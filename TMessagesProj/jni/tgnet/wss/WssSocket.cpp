@@ -47,6 +47,7 @@ constexpr const char *kOfficialPath = "/apiws";
 constexpr const char *kTunnelHosts[] = {
         "edge.amberwick.workers.dev",
         "fuckyourkn.copperbrook.workers.dev",
+        "nodeone.brackencombe.workers.dev",
 };
 constexpr size_t kTunnelHostCount = sizeof(kTunnelHosts) / sizeof(kTunnelHosts[0]);
 constexpr int32_t kTunnelOnlyDcId = 203;
