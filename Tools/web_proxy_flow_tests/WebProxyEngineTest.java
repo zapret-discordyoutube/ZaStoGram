@@ -77,14 +77,21 @@ public final class WebProxyEngineTest {
                     badMessage = "truncated frame";
                     return;
                 }
-                handle(type, id, batch, offset + 8, length);
+                handle(token, type, id, batch, offset + 8, length);
                 offset += 8 + length;
             }
         }
 
-        private void handle(int type, int id, byte[] data, int offset, int length) {
+        private void handle(int page, int type, int id, byte[] data, int offset, int length) {
             if (type == WebProxyEngine.FRAME_HELLO) {
-                reply(WebProxyEngine.frame(WebProxyEngine.FRAME_WELCOME, 0, null, 0, 0));
+                // Answered as the page the HELLO was posted to, like a real
+                // page does. The engine posts HELLO from its own thread as soon
+                // as pageInit() queues it, which can be before the test thread
+                // has stored the returned token: replying with this.token then
+                // carried the previous page's token, the engine dropped the
+                // WELCOME and the carrier never became ready (a loaded host
+                // lost this race in preflight on 09.10.2026).
+                engine.pageBytes(page, WebProxyEngine.frame(WebProxyEngine.FRAME_WELCOME, 0, null, 0, 0));
             } else if (type == WebProxyEngine.FRAME_OPEN) {
                 streams.put(id, new RelayStream());
             } else if (type == WebProxyEngine.FRAME_DATA) {
