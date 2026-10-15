@@ -8249,7 +8249,12 @@ public class ChatActivity extends BaseFragment implements
                         chatAttachAlert.setEditingMessageObject(type, editingMessageObject);
                         openAttachMenu();
                     };
-                    open.run(ChatAttachAlert.EDITMEDIA_TYPE_ANY);
+                    // ZaSto: у своего фото/видео «Заменить» сначала предлагает выбор: заменить или добавить медиа (новый альбом)
+                    if (isButtonPress && zastoCanOfferAppendMedia()) {
+                        zastoShowReplaceOrAppendChooser(() -> open.run(ChatAttachAlert.EDITMEDIA_TYPE_ANY));
+                    } else {
+                        open.run(ChatAttachAlert.EDITMEDIA_TYPE_ANY);
+                    }
                 } else {
                     scrollToMessageId(editingMessageObject.getId(), 0, true, 0, true, 0);
                 }
@@ -12657,6 +12662,7 @@ public class ChatActivity extends BaseFragment implements
                         AndroidUtilities.requestAdjustResize(getParentActivity(), classGuid);
                     }
                     super.dismissInternal();
+                    zastoEndAppendSession(); // ZaSto: шторка закрыта — режим «добавить медиа» заканчивается
                     onEditTextDialogClose(false, true);
                     if (contentView != null) {
                         ViewCompat.requestApplyInsets(contentView);
@@ -12705,6 +12711,22 @@ public class ChatActivity extends BaseFragment implements
                     if (editingMessageObject != null && editingMessageObject.messageOwner != null) {
                         editingMessageObject.messageOwner.invert_media = invertMedia;
                     }
+                    // ZaSto: режим «добавить медиа» — проверяем выбор до закрытия шторки, чтобы при отказе выбор не потерялся
+                    final org.telegram.messenger.ZaStoAppendMedia.Session zastoSession = zastoAppendSession;
+                    if (zastoSession != null && (button == 8 || button == 7 || button == 4) && !chatAttachAlert.getPhotoLayout().getSelectedPhotos().isEmpty()) {
+                        boolean zastoHasTtl = false;
+                        for (Object zastoEntry : chatAttachAlert.getPhotoLayout().getSelectedPhotos().values()) {
+                            if (zastoEntry instanceof MediaController.PhotoEntry && ((MediaController.PhotoEntry) zastoEntry).ttl > 0) {
+                                zastoHasTtl = true;
+                                break;
+                            }
+                        }
+                        final int zastoError = org.telegram.messenger.ZaStoAppendMedia.validateNew(zastoSession, chatAttachAlert.getPhotoLayout().getSelectedPhotos().size(), button == 4 || forceDocument, scheduleDate != 0, zastoHasTtl);
+                        if (zastoError != 0) {
+                            zastoToast(org.telegram.messenger.ZaStoAppendMedia.message(zastoError, zastoSession));
+                            return;
+                        }
+                    }
                     if (button == 8 || button == 7 || button == 4 && !chatAttachAlert.getPhotoLayout().getSelectedPhotos().isEmpty()) {
                         if (chatAttachAlert != null && button != 8) {
                             chatAttachAlert.dismiss(true);
@@ -12712,7 +12734,7 @@ public class ChatActivity extends BaseFragment implements
                         final HashMap<Object, Object> selectedPhotos = chatAttachAlert.getPhotoLayout().getSelectedPhotos();
                         final ArrayList<Object> selectedPhotosOrder = chatAttachAlert.getPhotoLayout().getSelectedPhotosOrder();
                         if (!selectedPhotos.isEmpty()) {
-                            final int albumsCount = (int) Math.ceil(selectedPhotos.size() / 10f);
+                            final int albumsCount = zastoSession != null ? 1 : (int) Math.ceil(selectedPhotos.size() / 10f);
                             for (int i = 0; i < albumsCount; ++i) {
                                 int count = Math.min(10, selectedPhotos.size() - (i * 10));
                                 ArrayList<SendMessagesHelper.SendingMediaInfo> photos = new ArrayList<>();
@@ -12764,7 +12786,14 @@ public class ChatActivity extends BaseFragment implements
                                     updateStickersOrder = photos.get(0).updateStickersOrder;
                                 }
 
-                                if (editingMessageObject != null && editingMessageObject.needResendWhenEdit()) {
+                                if (zastoSession != null) {
+                                    // ZaSto: исходные медиа + новые файлы уходят одним новым альбомом, оригинал потом удаляется
+                                    final int zastoSendError = org.telegram.messenger.ZaStoAppendMedia.send(getAccountInstance(), zastoSession, photos, notify, effectId, invertMedia, payStars, getSendMonoForumPeerId(), getMessageChatSendParams());
+                                    if (zastoSendError != 0) {
+                                        zastoToast(org.telegram.messenger.ZaStoAppendMedia.message(zastoSendError, zastoSession));
+                                    }
+                                    zastoEndAppendSession();
+                                } else if (editingMessageObject != null && editingMessageObject.needResendWhenEdit()) {
                                     MessageSuggestionParams params = messageSuggestionParams != null ?
                                         messageSuggestionParams : MessageSuggestionParams.of(editingMessageObject.messageOwner.suggested_post);
                                     SendMessagesHelper.prepareSendingMedia(getAccountInstance(), photos, dialog_id, editingMessageObject, getThreadMessage(), null, replyingQuote, button == 4 || forceDocument, arg, null, notify, scheduleDate, scheduleRepeatPeriod, chatMode, updateStickersOrder, null, getMessageChatSendParams(), effectId, invertMedia, payStars, getSendMonoForumPeerId(), params);
@@ -13670,7 +13699,9 @@ public class ChatActivity extends BaseFragment implements
         if (Build.VERSION.SDK_INT == 21 || Build.VERSION.SDK_INT == 22) {
             chatActivityEnterView.closeKeyboard();
         }
-        if (currentChat != null && messageSuggestionParams != null || isEphemeralMessage || chatMode == MODE_WELCOME_MESSAGES) {
+        if (zastoAppendSession != null) {
+            chatAttachAlert.setMaxSelectedPhotos(zastoAppendSession.maxNew(), true); // ZaSto: в альбоме всего 10 мест
+        } else if (currentChat != null && messageSuggestionParams != null || isEphemeralMessage || chatMode == MODE_WELCOME_MESSAGES) {
             chatAttachAlert.setMaxSelectedPhotos(1, true);
         } else if (currentChat != null && !ChatObject.hasAdminRights(currentChat) && currentChat.slowmode_enabled) {
             chatAttachAlert.setMaxSelectedPhotos(10, true);
@@ -33286,6 +33317,107 @@ public class ChatActivity extends BaseFragment implements
         }
         return null;
     }
+
+    // ---- ZaSto: «Добавить медиа» к своему сообщению с фото/видео (новый альбом: исходные медиа по ссылке + новые) ----
+    private org.telegram.messenger.ZaStoAppendMedia.Session zastoAppendSession;
+
+    private boolean zastoCanOfferAppendMedia() {
+        return editingMessageObject != null && chatMode == MODE_DEFAULT && currentEncryptedChat == null
+                && editingMessageObject.isOutOwner() && org.telegram.messenger.ZaStoAppendMedia.isPhotoOrVideo(editingMessageObject);
+    }
+
+    private void zastoToast(CharSequence text) {
+        if (getParentActivity() != null && !TextUtils.isEmpty(text)) {
+            android.widget.Toast.makeText(getParentActivity(), text, android.widget.Toast.LENGTH_LONG).show();
+        }
+    }
+
+    private void zastoEndAppendSession() {
+        zastoAppendSession = null;
+        if (chatAttachAlert != null) {
+            chatAttachAlert.setZaPhotoVideoOnly(false);
+        }
+    }
+
+    private void zastoShowReplaceOrAppendChooser(Runnable onReplace) {
+        if (getParentActivity() == null || editingMessageObject == null) {
+            onReplace.run();
+            return;
+        }
+        final BottomSheet.Builder builder = new BottomSheet.Builder(getParentActivity(), false, themeDelegate);
+        builder.setTitle(LocaleController.getString(R.string.ZaStoAppendMediaChoiceTitle));
+        builder.setItems(new CharSequence[]{
+                LocaleController.getString(editingMessageObject.isVideo() ? R.string.EditMessageReplaceVideo : R.string.EditMessageReplacePhoto),
+                LocaleController.getString(R.string.ZaStoAppendMedia)
+        }, new int[]{R.drawable.msg_replace, R.drawable.msg_addphoto}, (dialog, which) -> {
+            AndroidUtilities.runOnUIThread(() -> {
+                if (which == 0) {
+                    onReplace.run();
+                } else {
+                    zastoStartAppendMedia();
+                }
+            });
+        });
+        showDialog(builder.create());
+    }
+
+    private void zastoStartAppendMedia() {
+        final MessageObject editing = editingMessageObject;
+        if (editing == null || getParentActivity() == null) {
+            return;
+        }
+        final ArrayList<MessageObject> sources = new ArrayList<>();
+        final MessageObject.GroupedMessages group = getValidGroupedMessage(editing);
+        if (group != null) {
+            sources.addAll(group.messages);
+        } else if (editing.getGroupId() == 0) {
+            sources.add(editing);
+        }
+        final int error = org.telegram.messenger.ZaStoAppendMedia.validateSources(currentAccount, currentChat, currentEncryptedChat != null, chatMode, sources);
+        if (error != 0) {
+            zastoToast(org.telegram.messenger.ZaStoAppendMedia.message(error, null));
+            return;
+        }
+        final AlertDialog.Builder builder = new AlertDialog.Builder(getParentActivity(), themeDelegate);
+        builder.setTitle(LocaleController.getString(R.string.ZaStoAppendMedia));
+        builder.setMessage(LocaleController.getString(R.string.ZaStoAppendMediaConfirm));
+        builder.setPositiveButton(LocaleController.getString(R.string.Continue), (dialog, which) -> zastoBeginAppendMedia(editing, sources));
+        builder.setNegativeButton(LocaleController.getString(R.string.Cancel), null);
+        showDialog(builder.create());
+    }
+
+    private void zastoBeginAppendMedia(MessageObject editing, ArrayList<MessageObject> sources) {
+        if (editingMessageObject != editing || getParentActivity() == null || chatActivityEnterView == null) {
+            return;
+        }
+        final org.telegram.messenger.ZaStoAppendMedia.Session session = org.telegram.messenger.ZaStoAppendMedia.createSession(currentAccount, dialog_id, sources, getThreadMessage(), (int) getTopicId());
+        if (session == null) {
+            zastoToast(LocaleController.getString(R.string.ZaStoAppendMediaUnsupported));
+            return;
+        }
+        // Подпись берём из поля ввода (там текущий текст редактирования), потом выходим из режима редактирования.
+        final CharSequence fieldText = chatActivityEnterView.getFieldText();
+        final CharSequence caption = fieldText != null ? new SpannableStringBuilder(fieldText) : null;
+        showFieldPanel(false, null, null, null, null, true, 0, null, true, 0, true);
+
+        zastoAppendSession = session;
+        createChatAttachView();
+        if (chatAttachAlert == null) {
+            zastoAppendSession = null;
+            return;
+        }
+        chatAttachAlert.setEditingMessageObject(0, null);
+        chatAttachAlert.setZaPhotoVideoOnly(true);
+        openAttachMenu();
+        if (chatAttachAlert == null || !chatAttachAlert.isShowing()) {
+            zastoEndAppendSession();
+            return;
+        }
+        if (!TextUtils.isEmpty(caption)) {
+            chatAttachAlert.getCommentView().setText(caption);
+        }
+    }
+    // ---- /ZaSto ----
 
     private void startEditingMessageObject(MessageObject messageObject) {
         startEditingMessageObject(messageObject, false);

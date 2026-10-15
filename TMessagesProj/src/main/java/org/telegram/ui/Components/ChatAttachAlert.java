@@ -4437,6 +4437,19 @@ public class ChatAttachAlert extends BottomSheet implements NotificationCenter.N
     public static final int EDITMEDIA_TYPE_FILE = 1;
     public static final int EDITMEDIA_TYPE_MUSIC = 2;
 
+    // ZaSto: режим «добавить медиа к сообщению» — в шторке только фото/видео (галерея и камера), без файлов, музыки и т.п.
+    private boolean zaPhotoVideoOnly;
+
+    public void setZaPhotoVideoOnly(boolean value) {
+        if (zaPhotoVideoOnly == value) {
+            return;
+        }
+        zaPhotoVideoOnly = value;
+        if (buttonsAdapter != null) {
+            buttonsAdapter.notifyDataSetChanged();
+        }
+    }
+
     public void setEditingMessageObject(int type, MessageObject messageObject) {
         if (messageObject != null) {
             if (photoLayout != null) {
@@ -6714,7 +6727,7 @@ public class ChatAttachAlert extends BottomSheet implements NotificationCenter.N
         @Override
         public int getItemCount() {
             int count = buttonsCount;
-            if (editingMessageObject == null && baseFragment instanceof ChatActivity && !isPollAttach) {
+            if (editingMessageObject == null && !zaPhotoVideoOnly && baseFragment instanceof ChatActivity && !isPollAttach) {
                 count += MediaDataController.getInstance(currentAccount).inlineBots.size();
             }
             return count;
@@ -6760,6 +6773,8 @@ public class ChatAttachAlert extends BottomSheet implements NotificationCenter.N
                 if (pollAllowedLayouts == 0 || BitwiseUtils.hasFlag(pollAllowedLayouts, 1 << LAYOUT_TYPE_LINK)) {
                     linksButton = buttonsCount++;
                 }
+            } else if (zaPhotoVideoOnly && editingMessageObject == null) {
+                galleryButton = buttonsCount++;
             } else if (!(baseFragment instanceof ChatActivity)) {
                 galleryButton = buttonsCount++;
                 documentButton = buttonsCount++;
