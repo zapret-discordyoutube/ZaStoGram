@@ -11,6 +11,7 @@ import org.telegram.ui.Components.TextStyleSpan;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 
 public class RichMessageConvert {
@@ -77,6 +78,154 @@ public class RichMessageConvert {
 
         if (blocks.isEmpty()) blocks.add(emptyParagraph());
         return blocks;
+    }
+
+    // ZaStoGram: typed <details><summary>..</summary>..</details> text becomes a collapsible block,
+    // the same one the rich editor inserts. Only a correctly closed pair that starts a line
+    // (and ends its line) is converted, anything else stays plain text.
+    private static final int MAX_DETAILS_DEPTH = 8;
+
+    public static boolean hasTypedDetails(CharSequence text) {
+        return text != null && indexOfIgnoreCase(text, "<details", 0, text.length()) >= 0 && nextTypedDetails(text, 0) != null;
+    }
+
+    public static ArrayList<TL_iv.PageBlock> blocksFromTypedText(CharSequence text) {
+        return blocksFromTypedText(text, 0);
+    }
+
+    private static ArrayList<TL_iv.PageBlock> blocksFromTypedText(CharSequence text, int depth) {
+        if (text == null || depth >= MAX_DETAILS_DEPTH || indexOfIgnoreCase(text, "<details", 0, text.length()) < 0) {
+            return blocksFromCharSequence(text);
+        }
+        final ArrayList<TL_iv.PageBlock> out = new ArrayList<>();
+        final int n = text.length();
+        int segStart = 0;
+        int[] m;
+        while ((m = nextTypedDetails(text, segStart)) != null) {
+            final int lineStart = m[6];
+            if (lineStart > segStart) {
+                addTypedSegment(out, text.subSequence(segStart, lineStart - 1));
+            }
+            final TL_iv.pageBlockDetails details = new TL_iv.pageBlockDetails();
+            details.open = m[5] == 1;
+            final SpannableStringBuilder title = new SpannableStringBuilder(trimmed(text.subSequence(m[0], m[1])));
+            for (int i = 0; i < title.length(); i++) {
+                if (title.charAt(i) == '\n') title.replace(i, i + 1, " ");
+            }
+            details.title = title.length() == 0 ? new TL_iv.textEmpty() : RichTextStyle.fromSpannable(title);
+            details.blocks = blocksFromTypedText(trimmed(text.subSequence(m[2], m[3])), depth + 1);
+            out.add(details);
+            segStart = m[4] + 1;
+        }
+        if (segStart < n) {
+            addTypedSegment(out, text.subSequence(segStart, n));
+        }
+        if (out.isEmpty()) out.add(emptyParagraph());
+        return out;
+    }
+
+    private static void addTypedSegment(ArrayList<TL_iv.PageBlock> out, CharSequence segment) {
+        if (trimmed(segment).length() > 0) {
+            out.addAll(blocksFromCharSequence(segment));
+        }
+    }
+
+    // The first details pair at or after `from`: {titleFrom, titleTill, bodyFrom, bodyTill, end, open, lineStart}.
+    private static int[] nextTypedDetails(CharSequence text, int from) {
+        final Spanned sp = text instanceof Spanned ? (Spanned) text : null;
+        final int n = text.length();
+        int lineStart = from;
+        while (lineStart < n) {
+            int lineEnd = lineStart;
+            while (lineEnd < n && text.charAt(lineEnd) != '\n') lineEnd++;
+            final int[] m = matchDetails(text, lineStart);
+            if (m != null && (sp == null
+                    || sp.getSpans(lineStart, m[4], CodeHighlighting.Span.class).length == 0
+                    && sp.getSpans(lineStart, m[4], QuoteSpan.class).length == 0)) {
+                return new int[] { m[0], m[1], m[2], m[3], m[4], m[5], lineStart };
+            }
+            lineStart = lineEnd + 1;
+        }
+        return null;
+    }
+
+    private static int[] matchDetails(CharSequence text, int from) {
+        final int size = text.length();
+        int pos = from;
+        while (pos < size && (text.charAt(pos) == ' ' || text.charAt(pos) == '\t')) pos++;
+        if (!startsWithIgnoreCase(text, pos, "<details") || !isTagEnd(text, pos + 8)) return null;
+        int tagEnd = pos + 8;
+        while (tagEnd < size && text.charAt(tagEnd) != '>') {
+            if (text.charAt(tagEnd) == '\n') return null;
+            tagEnd++;
+        }
+        if (tagEnd >= size) return null;
+        final String attrs = text.subSequence(pos + 8, tagEnd).toString().trim().toLowerCase(Locale.ROOT);
+        final boolean open = attrs.equals("open") || attrs.equals("open=\"\"") || attrs.equals("open=''")
+            || attrs.equals("open=\"open\"") || attrs.equals("open='open'");
+        if (!attrs.isEmpty() && !open) return null;
+
+        int depth = 1;
+        int closeFrom = -1;
+        for (int i = tagEnd + 1; i < size; i++) {
+            if (text.charAt(i) != '<') continue;
+            if (startsWithIgnoreCase(text, i, "</details>")) {
+                if (--depth == 0) {
+                    closeFrom = i;
+                    break;
+                }
+                i += 9;
+            } else if (startsWithIgnoreCase(text, i, "<details") && isTagEnd(text, i + 8)) {
+                depth++;
+                i += 7;
+            }
+        }
+        if (closeFrom < 0) return null;
+        final int closeTill = closeFrom + 10;
+        int end = closeTill;
+        while (end < size && text.charAt(end) != '\n') end++;
+        for (int i = closeTill; i < end; i++) {
+            if (!Character.isWhitespace(text.charAt(i))) return null;
+        }
+
+        int titleFrom = tagEnd + 1, titleTill = tagEnd + 1, bodyFrom = tagEnd + 1;
+        int inner = tagEnd + 1;
+        while (inner < closeFrom && Character.isWhitespace(text.charAt(inner))) inner++;
+        if (startsWithIgnoreCase(text, inner, "<summary>")) {
+            final int summaryEnd = indexOfIgnoreCase(text, "</summary>", inner + 9, closeFrom);
+            if (summaryEnd >= 0) {
+                titleFrom = inner + 9;
+                titleTill = summaryEnd;
+                bodyFrom = summaryEnd + 10;
+            }
+        }
+        return new int[] { titleFrom, titleTill, bodyFrom, closeFrom, end, open ? 1 : 0 };
+    }
+
+    private static boolean isTagEnd(CharSequence text, int at) {
+        return at < text.length() && (text.charAt(at) == '>' || Character.isWhitespace(text.charAt(at)));
+    }
+
+    private static boolean startsWithIgnoreCase(CharSequence text, int at, String prefix) {
+        if (at < 0 || at + prefix.length() > text.length()) return false;
+        for (int i = 0; i < prefix.length(); i++) {
+            if (Character.toLowerCase(text.charAt(at + i)) != prefix.charAt(i)) return false;
+        }
+        return true;
+    }
+
+    private static int indexOfIgnoreCase(CharSequence text, String what, int from, int till) {
+        for (int i = Math.max(0, from); i + what.length() <= till; i++) {
+            if (startsWithIgnoreCase(text, i, what)) return i;
+        }
+        return -1;
+    }
+
+    private static CharSequence trimmed(CharSequence cs) {
+        int a = 0, b = cs.length();
+        while (a < b && Character.isWhitespace(cs.charAt(a))) a++;
+        while (b > a && Character.isWhitespace(cs.charAt(b - 1))) b--;
+        return a == 0 && b == cs.length() ? cs : cs.subSequence(a, b);
     }
 
     private static TL_iv.pageBlockParagraph paragraph(CharSequence line) {

@@ -384,7 +384,8 @@ public class RichEditorListView extends UniversalRecyclerView {
         if (text == null) return;
         initialSelectionRows = new ArrayList<>();
         final int start = rows.size();
-        flattenBlocks(rows, RichMessageConvert.blocksFromCharSequence(text), quoteAuthors);
+        // ZaStoGram: typed <details> pairs become collapsible blocks
+        flattenBlocks(rows, RichMessageConvert.blocksFromTypedText(text), quoteAuthors);
         for (int i = start; i < rows.size(); i++) {
             initialSelectionRows.add(rows.get(i));
         }

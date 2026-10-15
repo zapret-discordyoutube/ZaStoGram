@@ -7376,6 +7376,9 @@ public class ChatActivityEnterView extends FrameLayout implements
                 sendRichDraft(notify, scheduleDate, scheduleRepeatPeriod, payStars);
                 return;
             }
+            if (sendTypedDetails(notify, scheduleDate, scheduleRepeatPeriod, payStars)) {
+                return;
+            }
             CharSequence message = messageEditText == null ? "" : messageEditText.getTextToUse();
             if (parentFragment != null) {
                 TLRPC.Chat chat = parentFragment.getCurrentChat();
@@ -10636,7 +10639,7 @@ public class ChatActivityEnterView extends FrameLayout implements
             final CharSequence fieldText = messageEditText.getText();
             final CharSequence initialText = parseFieldMarkdown(fieldText);
             editor = new RichEditor(initialText);
-            if (initialText == fieldText) {
+            if (initialText == fieldText && !RichMessageConvert.hasTypedDetails(fieldText)) {
                 int selStart = messageEditText.getSelectionStart();
                 int selEnd = messageEditText.getSelectionEnd();
                 if (selStart < 0) selStart = messageEditText.length();
@@ -10862,6 +10865,48 @@ public class ChatActivityEnterView extends FrameLayout implements
             checkSendButton(true);
         });
         parentFragment.presentFragment(editor);
+    }
+
+    // ZaStoGram: typed <details><summary>..</summary>..</details> is sent as a collapsible block of a rich message
+    // (the same block the rich editor inserts). Plain text is sent as usual when the rich editor is not allowed.
+    private boolean sendTypedDetails(boolean notify, int scheduleDate, int scheduleRepeatPeriod, long payStars) {
+        if (messageEditText == null || parentFragment == null || editingMessageObject != null || parentFragment.isSecretChat()) {
+            return false;
+        }
+        final MessagesController messagesController = MessagesController.getInstance(currentAccount);
+        if (!messagesController.richEditorAvailable() || !messagesController.richEditorAllowed()) {
+            return false;
+        }
+        final CharSequence text = messageEditText.getTextToUse();
+        if (!RichMessageConvert.hasTypedDetails(text)) {
+            return false;
+        }
+        final ArrayList<TL_iv.PageBlock> blocks = RichMessageConvert.blocksFromTypedText(text);
+        if (blocks == null || blocks.isEmpty()) {
+            return false;
+        }
+        SendMessagesHelper.prepareSendingArticle(
+            accountInstance,
+            blocks,
+            false,
+            dialog_id,
+            replyingMessageObject,
+            getThreadMessage(),
+            notify,
+            scheduleDate,
+            scheduleRepeatPeriod,
+            parentFragment.getMessageChatSendParams(),
+            effectId,
+            getSendMonoForumPeerId(),
+            payStars
+        );
+        sendButton.setEffect(effectId = 0);
+        messageEditText.setText("");
+        if (delegate != null) {
+            delegate.onMessageSend(null, notify, scheduleDate, scheduleRepeatPeriod, payStars);
+        }
+        checkSendButton(true);
+        return true;
     }
 
     private void sendRichDraft(boolean notify, int scheduleDate, int scheduleRepeatPeriod, long payStars) {
