@@ -136,6 +136,7 @@ import org.telegram.messenger.SRPHelper;
 import org.telegram.messenger.SharedConfig;
 import org.telegram.messenger.UserConfig;
 import org.telegram.messenger.Utilities;
+import org.telegram.proxy.ProxyWssFallback;
 import org.telegram.tgnet.ConnectionsManager;
 import org.telegram.tgnet.RequestDelegate;
 import org.telegram.tgnet.SerializedData;
@@ -1167,6 +1168,76 @@ public class LoginActivity extends BaseFragment implements NotificationCenter.No
         needShowAlert(getString(R.string.RestorePasswordNoEmailTitle), text);
     }
 
+    private static String loginConnectionStateName(int state) {
+        switch (state) {
+            case ConnectionsManager.ConnectionStateConnecting:
+                return "connecting";
+            case ConnectionsManager.ConnectionStateWaitingForNetwork:
+                return "waiting_for_network";
+            case ConnectionsManager.ConnectionStateConnected:
+                return "connected";
+            case ConnectionsManager.ConnectionStateConnectingToProxy:
+                return "connecting_to_proxy";
+            case ConnectionsManager.ConnectionStateUpdating:
+                return "updating";
+            default:
+                return "unknown_" + state;
+        }
+    }
+
+    /**
+     * One-line snapshot of how this install reaches Telegram: connection state,
+     * datacenter and which transport (proxy, WSS, VPN) is active. It is shown
+     * with login failures so that a tester can report what the login screen
+     * was doing instead of only "it does not log in".
+     */
+    private String buildLoginConnectionDiagnostics(boolean full) {
+        final StringBuilder sb = new StringBuilder();
+        try {
+            final ConnectionsManager connectionsManager = getConnectionsManager();
+            sb.append("state=").append(loginConnectionStateName(connectionsManager.getConnectionState()));
+            sb.append("; dc=").append(connectionsManager.getCurrentDatacenterId());
+            String proxy = "none";
+            final SharedConfig.ProxyInfo proxyInfo = SharedConfig.currentProxy;
+            if (SharedConfig.isProxyEnabled() && proxyInfo != null && proxyInfo.settings != null) {
+                proxy = proxyInfo.isWebProxy() ? "web" : TextUtils.isEmpty(proxyInfo.settings.getSecret()) ? "socks5" : "mtproxy";
+                if (ProxyWssFallback.isEngaged()) {
+                    proxy += "(wss_fallback)";
+                }
+            }
+            sb.append("; proxy=").append(proxy);
+            sb.append("; wss=").append(ConnectionsManager.isWssTransportActive() ? "on" : SharedConfig.wssTransportEnabled ? "suspended" : "off");
+            if (full) {
+                sb.append("; vpn=").append(ApplicationLoader.isVpnActive() ? "yes" : "no");
+                sb.append("; network=").append(ApplicationLoader.isNetworkOnline() ? "online" : "offline");
+                sb.append("; build=").append(BuildVars.BUILD_VERSION_STRING);
+            }
+        } catch (Throwable e) {
+            FileLog.e(e);
+        }
+        return sb.toString();
+    }
+
+    /**
+     * Terminal login failure: restores the phone form and shows the reason
+     * together with the connection snapshot, which can be copied for support.
+     */
+    private void showLoginFailureAlert(String text) {
+        needHideProgress(false, false);
+        if (getParentActivity() == null || getParentActivity().isFinishing()) {
+            return;
+        }
+        final String diagnostics = buildLoginConnectionDiagnostics(true);
+        final String full = TextUtils.isEmpty(diagnostics) ? text : text + "\n\n" + diagnostics;
+        FileLog.e("phone_login failure " + diagnostics + " text=" + text);
+        AlertDialog.Builder builder = new AlertDialog.Builder(getParentActivity());
+        builder.setTitle(getString(R.string.RestorePasswordNoEmailTitle));
+        builder.setMessage(full);
+        builder.setPositiveButton(getString(R.string.OK), null);
+        builder.setNeutralButton(getString(R.string.Copy), (dialog, which) -> AndroidUtilities.addToClipboard(full));
+        showDialog(builder.create());
+    }
+
     private void onFieldError(View view, boolean allowErrorSelection) {
         try {
             view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP, HapticFeedbackConstants.FLAG_IGNORE_GLOBAL_SETTING);
@@ -1719,7 +1790,9 @@ public class LoginActivity extends BaseFragment implements NotificationCenter.No
                     }
                     new AlertDialog.Builder(getContext())
                             .setTitle(getString(R.string.RestorePasswordNoEmailTitle))
-                            .setMessage(getString(R.string.SafetyNetErrorOccurred))
+                            .setMessage(error != null && !TextUtils.isEmpty(error.text)
+                                    ? getString(R.string.SafetyNetErrorOccurred) + "\n" + error.code + " " + error.text
+                                    : getString(R.string.SafetyNetErrorOccurred))
                             .setPositiveButton(getString(R.string.OK), (dialog, which) -> {
                                 if (currentViewNum != VIEW_PHONE_INPUT) {
                                     setPage(VIEW_PHONE_INPUT, true, null, true);
@@ -1879,8 +1952,10 @@ public class LoginActivity extends BaseFragment implements NotificationCenter.No
         private boolean nextPressed = false;
         private boolean confirmedNumber = false;
         private static final long PHONE_CODE_REQUEST_TIMEOUT_MS = 75_000L;
+        private static final long PHONE_CODE_REQUEST_HINT_MS = 20_000L;
         private int phoneCodeRequestId;
         private Runnable phoneCodeRequestTimeout;
+        private Runnable phoneCodeRequestHint;
 
         private int titleClickCount = 0;
         private long lastTitleClick = 0;
@@ -2743,6 +2818,10 @@ public class LoginActivity extends BaseFragment implements NotificationCenter.No
                 AndroidUtilities.cancelRunOnUIThread(phoneCodeRequestTimeout);
                 phoneCodeRequestTimeout = null;
             }
+            if (phoneCodeRequestHint != null) {
+                AndroidUtilities.cancelRunOnUIThread(phoneCodeRequestHint);
+                phoneCodeRequestHint = null;
+            }
             phoneCodeRequestId = 0;
         }
 
@@ -2755,16 +2834,30 @@ public class LoginActivity extends BaseFragment implements NotificationCenter.No
                 }
                 phoneCodeRequestTimeout = null;
                 phoneCodeRequestId = 0;
+                if (phoneCodeRequestHint != null) {
+                    AndroidUtilities.cancelRunOnUIThread(phoneCodeRequestHint);
+                    phoneCodeRequestHint = null;
+                }
                 ConnectionsManager.getInstance(currentAccount).cancelRequest(requestId, false);
                 nextPressed = false;
                 needHideProgress(false);
                 if (getParentActivity() != null && !getParentActivity().isFinishing()) {
-                    needShowAlert(
-                            getString(R.string.RestorePasswordNoEmailTitle),
-                            getString(R.string.LoginCodeRequestTimeout));
+                    showLoginFailureAlert(getString(R.string.LoginCodeRequestTimeout));
                 }
             };
             AndroidUtilities.runOnUIThread(phoneCodeRequestTimeout, PHONE_CODE_REQUEST_TIMEOUT_MS);
+            phoneCodeRequestHint = () -> {
+                phoneCodeRequestHint = null;
+                if (!nextPressed || phoneCodeRequestId != requestId || getParentActivity() == null || getParentActivity().isFinishing()) {
+                    return;
+                }
+                // The request has been waiting for a while: say what the
+                // connection is doing instead of leaving a silent spinner.
+                BulletinFactory.of(LoginActivity.this).createSimpleBulletin(
+                        R.raw.info,
+                        formatString(R.string.LoginCodeRequestSlow, buildLoginConnectionDiagnostics(false))).show();
+            };
+            AndroidUtilities.runOnUIThread(phoneCodeRequestHint, PHONE_CODE_REQUEST_HINT_MS);
         }
 
         @Override
@@ -3171,9 +3264,24 @@ public class LoginActivity extends BaseFragment implements NotificationCenter.No
                         } else if (error.text.contains("API_ID_PUBLISHED_FLOOD")) {
                             FileLog.e("phone_login api_identity_rejected error=" + error.text);
                             showPhoneCodeRequestError(getString(R.string.LoginApiCredentialsError));
-                        } else if (error.code != -1000) {
-                            AlertsCreator.processError(currentAccount, error, LoginActivity.this, req, phoneInputData.phoneNumber);
+                        } else if (error.text.contains("UPDATE_APP_TO_LOGIN")) {
+                            FileLog.e("phone_login update_required error=" + error.text);
+                            showLoginFailureAlert(getString(R.string.LoginUpdateAppRequired));
+                        } else if (error.text.contains("SEND_CODE_UNAVAILABLE")) {
+                            FileLog.e("phone_login send_code_unavailable error=" + error.text);
+                            showLoginFailureAlert(getString(R.string.LoginSendCodeUnavailable));
+                        } else if (error.code != -1000 && error.code != -2000) {
+                            if (req instanceof TLRPC.TL_auth_sendCode) {
+                                // AlertsCreator.processError has no auth.sendCode branch and
+                                // drops every 406 error, so any other server answer used to
+                                // return the user to the phone form without a word.
+                                showLoginFailureAlert(formatString(R.string.LoginCodeRequestFailed, error.code + " " + error.text));
+                            } else {
+                                AlertsCreator.processError(currentAccount, error, LoginActivity.this, req, phoneInputData.phoneNumber);
+                            }
                         }
+                    } else if (error.code != -1000 && error.code != -2000) {
+                        showLoginFailureAlert(formatString(R.string.LoginCodeRequestFailed, String.valueOf(error.code)));
                     }
                 }
                 if (!isRequestingFirebaseSms) {

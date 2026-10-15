@@ -11413,6 +11413,10 @@
     <string name="ArticleAIAddToPage">Add to Page</string>
     <string name="LoginCodeRequestTimeout">Telegram did not answer the code request. Check the proxy connection and try again.</string>
     <string name="LoginApiCredentialsError">Telegram rejected this build’s API ID (API_ID_PUBLISHED_FLOOD). Install the latest official ZaStoGram release and try again. If it is already installed, the release API credentials must be replaced.</string>
+    <string name="LoginCodeRequestSlow">Telegram is taking longer than usual to answer. Connection: %1$s</string>
+    <string name="LoginCodeRequestFailed">Could not request the login code: %1$s</string>
+    <string name="LoginUpdateAppRequired">Telegram requires a newer app version to sign in. Install the latest ZaStoGram release and try again.</string>
+    <string name="LoginSendCodeUnavailable">All ways to deliver the login code for this number have been used up. Wait a few hours and try again, or sign in from another device where the account is already open.</string>
     <string name="ZaStoGramVersion">ZaStoGram %1$s (build %2$d)</string>
     <string name="MessageTechnicalDetails">Technical details</string>
     <string name="MessageTechnicalDetailsTitle">Message details</string>

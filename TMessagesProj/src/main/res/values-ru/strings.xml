@@ -431,6 +431,10 @@
     <string name="EditableForwardUnsupported">Это сообщение нельзя отправить редактируемой копией</string>
     <string name="LoginCodeRequestTimeout">Telegram не ответил на запрос кода. Проверьте подключение прокси и попробуйте ещё раз.</string>
     <string name="LoginApiCredentialsError">Telegram отклонил API ID этой сборки (API_ID_PUBLISHED_FLOOD). Установите последний официальный релиз ZaStoGram и повторите вход. Если он уже установлен, API-данные релиза нужно заменить.</string>
+    <string name="LoginCodeRequestSlow">Telegram отвечает дольше обычного. Соединение: %1$s</string>
+    <string name="LoginCodeRequestFailed">Не удалось запросить код входа: %1$s</string>
+    <string name="LoginUpdateAppRequired">Для входа Telegram требует более новую версию приложения. Установите последний релиз ZaStoGram и повторите вход.</string>
+    <string name="LoginSendCodeUnavailable">Все способы доставки кода для этого номера исчерпаны. Подождите несколько часов и повторите попытку или войдите с другого устройства, где аккаунт уже открыт.</string>
     <string name="ZaStoGramVersion">ZaStoGram %1$s (сборка %2$d)</string>
     <string name="DoubleTapSetting">Быстрые реакции</string>
     <string name="DoubleTapPreviewRational">Дважды нажмите на сообщение, чтобы поставить быструю реакцию.</string>
