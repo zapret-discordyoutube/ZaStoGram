@@ -184,6 +184,40 @@ public class MessagesSearchAdapter extends RecyclerListView.SelectionAdapter imp
         } else {
             super.notifyDataSetChanged();
         }
+
+        // ZaSto: пришла новая порция результатов — «выбрать все» может продолжить
+        final org.telegram.ui.ZaStoSearchSelection zaSelection = zaSelection();
+        if (zaSelection != null) {
+            zaSelection.onResultsChanged((org.telegram.ui.ChatActivity) fragment);
+        }
+    }
+
+    // ZaSto: выделение результатов (см. ZaStoSearchSelection); страница результатов — это ChatActivity
+    private org.telegram.ui.ZaStoSearchSelection zaSelection() {
+        return fragment instanceof org.telegram.ui.ChatActivity ? ((org.telegram.ui.ChatActivity) fragment).zaSearchSelection() : null;
+    }
+
+    /** Все найденные сообщения страницы (в списке строк скрыты не первые части альбомов). */
+    public ArrayList<MessageObject> getSourceMessages() {
+        return searchType == 0 ? MediaDataController.getInstance(currentAccount).getFoundMessageObjects() : HashtagSearchController.getInstance(currentAccount).getMessages(searchType);
+    }
+
+    /** Подсветить галочками выделенные строки среди видимых. */
+    public void zaUpdateCheckedRows(RecyclerListView listView, boolean animated) {
+        final org.telegram.ui.ZaStoSearchSelection zaSelection = zaSelection();
+        if (zaSelection == null) {
+            return;
+        }
+        for (int i = 0, n = listView.getChildCount(); i < n; i++) {
+            final View child = listView.getChildAt(i);
+            if (child instanceof DialogCell) {
+                final int position = listView.getChildAdapterPosition(child);
+                final Object item = position >= 0 ? getItem(position) : null;
+                if (item instanceof MessageObject) {
+                    ((DialogCell) child).setChecked(zaSelection.isRowSelected((MessageObject) item), animated);
+                }
+            }
+        }
     }
 
     @Override
@@ -256,6 +290,10 @@ public class MessagesSearchAdapter extends RecyclerListView.SelectionAdapter imp
                 useMe = true;
             }
             cell.setDialog(did, messageObject, date, useMe, false);
+            final org.telegram.ui.ZaStoSearchSelection zaSelection = zaSelection(); // ZaSto
+            if (zaSelection != null) {
+                cell.setChecked(zaSelection.isRowSelected(messageObject), false);
+            }
             cell.setDialogCellDelegate(new DialogCell.DialogCellDelegate() {
                 @Override
                 public void onButtonClicked(DialogCell dialogCell) {
