@@ -363,6 +363,7 @@ chaquopy {
             // install these at BUILD time (there is no runtime pip), so they must be declared
             // here once and shipped in the APK — mirrors what exteraGram bundles.
             install "beautifulsoup4" // common HTML parsing helper used by plugin libraries
+            install "soupsieve<3.0.2" // beautifulsoup4 dependency; 3.0.2+ needs Python 3.11.5, Chaquopy ships 3.11.2
             install "debugpy"        // debugger backend listed by exteraGram for plugin development
             install "lxml"           // XML/HTML parser bundled by exteraGram
             install "packaging"      // version parsing for shared plugin libraries such as ZwyLib
