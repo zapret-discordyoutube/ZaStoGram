@@ -1,0 +1,118 @@
+ZaStoGram: TCP/TLS fallback for call relays, applied on top of the upstream tgcalls
+submodule (TMessagesProj/jni/tgcalls, tracked at ccbb579 for Telegram 13.0.2).
+Adds RtcServer::isTls and Config::relayTcpTls; used by voip/org_telegram_messenger_voip_Instance.cpp
+(NativeInstance config field relayTcpTls). Applied idempotently by voip/CMakeLists.txt.
+Regenerate after bumping the submodule: edit in TMessagesProj/jni/tgcalls, then
+  git -C TMessagesProj/jni/tgcalls diff -- tgcalls/Instance.h tgcalls/v2/InstanceV2ReferenceImpl.cpp tgcalls/v2/NativeNetworkingImpl.cpp
+
+diff --git a/tgcalls/Instance.h b/tgcalls/Instance.h
+index 54a8e149e..bd1e07f0a 100644
+--- a/tgcalls/Instance.h
++++ b/tgcalls/Instance.h
+@@ -52,6 +52,7 @@ struct RtcServer {
+ 	std::string password;
+ 	bool isTurn = false;
+     bool isTcp = false;
++    bool isTls = false;
+ };
+ 
+ enum class EndpointType {
+@@ -123,6 +124,9 @@ struct Config {
+     std::vector<std::string> preferredVideoCodecs;
+     ProtocolVersion protocolVersion = ProtocolVersion::V0;
+     std::string customParameters = "";
++    // Разрешает резервные маршруты к релеям по TCP и TLS. Без него реализации
++    // берут только UDP-адреса, как в апстриме.
++    bool relayTcpTls = false;
+ };
+ 
+ struct EncryptionKey {
+diff --git a/tgcalls/v2/InstanceV2ReferenceImpl.cpp b/tgcalls/v2/InstanceV2ReferenceImpl.cpp
+index 9a1c99433..cbab39a24 100644
+--- a/tgcalls/v2/InstanceV2ReferenceImpl.cpp
++++ b/tgcalls/v2/InstanceV2ReferenceImpl.cpp
+@@ -368,6 +368,7 @@ public:
+     _rtcServers(descriptor.rtcServers),
+     _proxy(std::move(descriptor.proxy)),
+     _enableP2P(descriptor.config.enableP2P),
++    _relayTcpTls(descriptor.config.relayTcpTls),
+     _encryptionKey(std::move(descriptor.encryptionKey)),
+     _stateUpdated(descriptor.stateUpdated),
+     _signalBarsUpdated(descriptor.signalBarsUpdated),
+@@ -715,7 +716,9 @@ public:
+         const bool allowHostnameIceServers = getCustomParameterBoolDefaultTrue(_customParameters, "network_reference_allow_hostname_ice_servers");
+ 
+         for (auto &server : _rtcServers) {
+-            if (server.isTcp) {
++            // Резервные маршруты по TCP и TLS имеют смысл только для релеев и
++            // только когда их разрешили: без этого берутся одни UDP-адреса.
++            if (server.isTcp && !(_relayTcpTls && server.isTurn)) {
+                 continue;
+             }
+ 
+@@ -755,10 +758,20 @@ public:
+ 
+                 webrtc::PeerConnectionInterface::IceServer mappedServer;
+ 
+-                mappedServer.urls.push_back(
+-                    "turn:" + address.HostAsURIString() + ":" + std::to_string(server.port));
++                const std::string scheme = server.isTls ? "turns:" : "turn:";
++                const std::string transport = server.isTcp ? "?transport=tcp" : "";
++                const std::string url =
++                    scheme + address.HostAsURIString() + ":" + std::to_string(server.port) + transport;
++                RTC_LOG(LS_INFO) << "Adding ICE server: " << url;
++                mappedServer.urls.push_back(url);
+                 mappedServer.username = server.login;
+                 mappedServer.password = server.password;
++                if (server.isTls) {
++                    // Релей адресуется по IP, поэтому цепочку сертификата проверять
++                    // не по чему. TLS здесь не защищает медиа — оно зашифровано выше
++                    // по стеку — а только придаёт трафику вид HTTPS.
++                    mappedServer.tls_cert_policy = webrtc::PeerConnectionInterface::TlsCertPolicy::kTlsCertPolicyInsecureNoCheck;
++                }
+ 
+                 peerConnectionConfiguration.servers.push_back(mappedServer);
+             } else {
+@@ -1833,6 +1846,7 @@ private:
+     std::map<std::string, json11::Json> _customParameters;
+     std::unique_ptr<Proxy> _proxy;
+     bool _enableP2P = false;
++    bool _relayTcpTls = false;
+     EncryptionKey _encryptionKey;
+     std::function<void(State)> _stateUpdated;
+     std::function<void(int)> _signalBarsUpdated;
+diff --git a/tgcalls/v2/NativeNetworkingImpl.cpp b/tgcalls/v2/NativeNetworkingImpl.cpp
+index b067cf540..c8ec1137b 100644
+--- a/tgcalls/v2/NativeNetworkingImpl.cpp
++++ b/tgcalls/v2/NativeNetworkingImpl.cpp
+@@ -611,12 +611,27 @@ void NativeNetworkingImpl::resetDtlsSrtpTransport() {
+ 
+     for (auto &server : _rtcServers) {
+         if (server.isTurn) {
+-            turnServers.push_back(cricket::RelayServerConfig(
++            cricket::ProtocolType proto = cricket::PROTO_UDP;
++            if (server.isTls) {
++                proto = cricket::PROTO_TLS;
++            } else if (server.isTcp) {
++                proto = cricket::PROTO_TCP;
++            }
++            cricket::RelayServerConfig relayConfig(
+                 rtc::SocketAddress(server.host, server.port),
+                 server.login,
+                 server.password,
+-                server.isTcp ? cricket::PROTO_TCP : cricket::PROTO_UDP
+-            ));
++                proto
++            );
++            if (server.isTls) {
++                // Сервер адресуется по IP, а не по имени, поэтому проверять цепочку
++                // сертификата не по чему. TLS здесь не защищает медиа — оно и так
++                // зашифровано выше по стеку — а только придаёт трафику вид HTTPS.
++                relayConfig.tls_cert_policy = cricket::TlsCertPolicy::TLS_CERT_POLICY_INSECURE_NO_CHECK;
++            }
++            RTC_LOG(LS_INFO) << "Adding TURN server: " << server.host << ":" << server.port
++                             << " proto=" << (server.isTls ? "tls" : (server.isTcp ? "tcp" : "udp"));
++            turnServers.push_back(std::move(relayConfig));
+         } else {
+             rtc::SocketAddress stunAddress = rtc::SocketAddress(server.host, server.port);
+             stunServers.insert(stunAddress);

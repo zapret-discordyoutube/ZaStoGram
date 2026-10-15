@@ -88,7 +88,6 @@ android {
 
     defaultConfig.applicationId = zastoApplicationId
 
-    sourceSets.main.jniLibs.srcDirs = ['../TMessagesProj/jni/']
 
     lintOptions {
         disable 'MissingTranslation'
@@ -121,6 +120,12 @@ android {
             storePassword zastoReleaseStorePassword ?: RELEASE_STORE_PASSWORD
             keyAlias zastoReleaseKeyAlias ?: RELEASE_KEY_ALIAS
             keyPassword zastoReleaseKeyPassword ?: RELEASE_KEY_PASSWORD
+        }
+    }
+
+    packagingOptions {
+        jniLibs {
+            useLegacyPackaging = true
         }
     }
 

@@ -101,6 +101,12 @@ public final class WebProxyTransport implements ForegroundDetector.Listener, Web
     private boolean pageUsesPort;
     // A port page failed before the relay welcomed it: use the listener.
     private boolean portsFailed;
+    // Listener page only: the WebView can post ArrayBuffers; otherwise the
+    // frames travel as base64 text (see BASE64_BRIDGE_SCRIPT).
+    private boolean useArrayBuffer = true;
+    // Listener page, text carrier: the wrapper script is installed.
+    private boolean bridgeReady;
+    private boolean base64InstallTimeoutRetried;
 
     // The port of the current page; replaced under portLock.
     private final Object portLock = new Object();
@@ -140,6 +146,55 @@ public final class WebProxyTransport implements ForegroundDetector.Listener, Web
             + "})();";
     private static final String PORT_HELLO = "tproxy-android-port";
     private static final long PORT_INIT_TIMEOUT_MS = 15_000;
+
+    // WebViews without WEB_MESSAGE_ARRAY_BUFFER (no port either) carry the
+    // frames as base64 text: a script installed once the page has announced
+    // itself wraps the page's postMessage/onmessage, so the page keeps
+    // seeing ArrayBuffers.
+    private static final String BASE64_PREFIX = "tproxy-base64:";
+    private static final int MAX_BASE64_LENGTH =
+            ((WebProxyEngine.FRAME_HEADER + WebProxyEngine.FRAME_MAX_PAYLOAD + 2) / 3) * 4;
+    private static final long BASE64_INSTALL_TIMEOUT_MS = 5000;
+    private static final String BASE64_BRIDGE_SCRIPT =
+        "(function(){\n" +
+        "'use strict';\n" +
+        "try {\n" +
+        " var bridge=window.TelegramWebProxy;\n" +
+        " if(!bridge||typeof bridge.postMessage!=='function'||typeof bridge.onmessage!=='function')return false;\n" +
+        " var nativePost=bridge.postMessage;\n" +
+        " var receive=bridge.onmessage;\n" +
+        " var prefix='tproxy-base64:';\n" +
+        " var maxBytes=1048584;\n" +
+        " var maxChars=1398112;\n" +
+        " function post(value){\n" +
+        "  if(value instanceof ArrayBuffer){\n" +
+        "   if(value.byteLength>maxBytes)throw new Error('WEB proxy frame too large');\n" +
+        "   var bytes=new Uint8Array(value),parts=[];\n" +
+        "   for(var i=0;i<bytes.length;i+=8192){\n" +
+        "    parts.push(String.fromCharCode.apply(null,bytes.subarray(i,Math.min(i+8192,bytes.length))));\n" +
+        "   }\n" +
+        "   nativePost.call(bridge,prefix+btoa(parts.join('')));\n" +
+        "  }else nativePost.call(bridge,value);\n" +
+        " }\n" +
+        " function onmessage(event){\n" +
+        "  var data=event.data;\n" +
+        "  if(typeof data==='string'&&data.indexOf(prefix)===0){\n" +
+        "   try {\n" +
+        "    var encoded=data.substring(prefix.length);\n" +
+        "    if(encoded.length>maxChars)throw new Error('WEB proxy frame too large');\n" +
+        "    var binary=atob(encoded);\n" +
+        "    if(binary.length>maxBytes)throw new Error('WEB proxy frame too large');\n" +
+        "    var bytes=new Uint8Array(binary.length);\n" +
+        "    for(var i=0;i<binary.length;i++)bytes[i]=binary.charCodeAt(i);\n" +
+        "    receive.call(bridge,{data:bytes.buffer});\n" +
+        "   }catch(error){nativePost.call(bridge,'{\"t\":\"close\"}');}\n" +
+        "  }else receive.call(bridge,event);\n" +
+        " }\n" +
+        " bridge.postMessage=post;\n" +
+        " bridge.onmessage=onmessage;\n" +
+        " return bridge.postMessage===post&&bridge.onmessage===onmessage;\n" +
+        "}catch(error){return false;}\n" +
+        "})()\n";
     private static HandlerThread portThread;
     private static Handler portHandler;
 
@@ -297,8 +352,7 @@ public final class WebProxyTransport implements ForegroundDetector.Listener, Web
 
     public static boolean isSupported() {
         try {
-            return WebViewFeature.isFeatureSupported(WebViewFeature.WEB_MESSAGE_LISTENER)
-                    && WebViewFeature.isFeatureSupported(WebViewFeature.WEB_MESSAGE_ARRAY_BUFFER);
+            return WebViewFeature.isFeatureSupported(WebViewFeature.WEB_MESSAGE_LISTENER);
         } catch (Throwable e) {
             FileLog.e(e);
             return false;
@@ -563,7 +617,11 @@ public final class WebProxyTransport implements ForegroundDetector.Listener, Web
                 }
             }
             try {
-                target.postMessage(message);
+                if (useArrayBuffer) {
+                    target.postMessage(message);
+                } else {
+                    target.postMessage(BASE64_PREFIX + Base64.encodeToString(message, Base64.NO_WRAP));
+                }
             } catch (Exception e) {
                 FileLog.e(e);
                 engine.pageFailed(token, "post_failed");
@@ -595,6 +653,13 @@ public final class WebProxyTransport implements ForegroundDetector.Listener, Web
             return;
         }
         webView = view;
+        bridgeReady = false;
+        try {
+            useArrayBuffer = WebViewFeature.isFeatureSupported(WebViewFeature.WEB_MESSAGE_ARRAY_BUFFER);
+        } catch (Throwable e) {
+            FileLog.e(e);
+            useArrayBuffer = false;
+        }
         view.setBackgroundColor(Color.TRANSPARENT);
         WebSettings settings = view.getSettings();
         settings.setJavaScriptEnabled(true);
@@ -759,7 +824,90 @@ public final class WebProxyTransport implements ForegroundDetector.Listener, Web
             // engine.
             engine.pageBytes(pageToken, message.getArrayBuffer());
         } else if (message.getType() == WebMessageCompat.TYPE_STRING) {
-            handleControl(message.getData(), sourceReplyProxy);
+            String data = message.getData();
+            if (!useArrayBuffer && data != null && data.startsWith(BASE64_PREFIX)) {
+                onBase64Message(data, sourceReplyProxy);
+            } else {
+                handleControl(data, sourceReplyProxy);
+            }
+        }
+    }
+
+    // Text carrier: the frames of one page message arrive base64-encoded.
+    // Decoding goes to the port thread, so the UI thread only takes the text;
+    // that thread is single, which keeps the order of the messages.
+    private void onBase64Message(String data, JavaScriptReplyProxy sourceReplyProxy) {
+        if (!bridgeReady || replyProxy == null || replyProxy != sourceReplyProxy) {
+            return;
+        }
+        final int token = pageToken;
+        if (data.length() - BASE64_PREFIX.length() > MAX_BASE64_LENGTH) {
+            engine.pageFailed(token, "frame_too_large");
+            return;
+        }
+        portHandler().post(() -> {
+            if (stopped) {
+                return;
+            }
+            try {
+                byte[] decoded = Base64.decode(data.substring(BASE64_PREFIX.length()), Base64.NO_WRAP);
+                if (decoded.length < WebProxyEngine.FRAME_HEADER
+                        || decoded.length > WebProxyEngine.FRAME_HEADER + WebProxyEngine.FRAME_MAX_PAYLOAD) {
+                    engine.pageFailed(token, "frame_size");
+                    return;
+                }
+                engine.pageBytes(token, decoded);
+            } catch (IllegalArgumentException e) {
+                FileLog.e(e);
+                engine.pageFailed(token, "base64_decode");
+            }
+        });
+    }
+
+    // The page has announced itself, but cannot start its session until the
+    // engine sends HELLO (pageInit): wrap the bridge first.
+    private void installBase64Bridge(WebView sourceView, JavaScriptReplyProxy sourceReplyProxy) {
+        Runnable timeout = () -> {
+            if (stopped || webView != sourceView || replyProxy != sourceReplyProxy || bridgeReady) {
+                return;
+            }
+            if (base64InstallTimeoutRetried) {
+                FileLog.e("WEB proxy: Base64 bridge installation timed out again; transport stopped");
+                stopInternal();
+            } else {
+                base64InstallTimeoutRetried = true;
+                FileLog.e("WEB proxy: Base64 bridge installation timed out; retrying once");
+                engine.pageFailed(0, "base64_install_timeout");
+            }
+        };
+        AndroidUtilities.runOnUIThread(timeout, BASE64_INSTALL_TIMEOUT_MS);
+        try {
+            sourceView.evaluateJavascript(BASE64_BRIDGE_SCRIPT, result -> {
+                AndroidUtilities.cancelRunOnUIThread(timeout);
+                if (stopped || webView != sourceView || replyProxy != sourceReplyProxy || bridgeReady) {
+                    return;
+                }
+                if (!"true".equals(result)) {
+                    FileLog.e("WEB proxy: Base64 bridge installation failed; transport stopped");
+                    stopInternal();
+                    return;
+                }
+                if (!isCurrentBridgeDocument(sourceView)) {
+                    engine.pageFailed(0, "base64_document_changed");
+                    return;
+                }
+                base64InstallTimeoutRetried = false;
+                bridgeReady = true;
+                if (BuildVars.LOGS_ENABLED) {
+                    FileLog.d("web_proxy_carrier event=base64_bridge_ready");
+                }
+                pageToken = engine.pageInit();
+            });
+        } catch (Exception e) {
+            AndroidUtilities.cancelRunOnUIThread(timeout);
+            FileLog.e(e);
+            FileLog.e("WEB proxy: Base64 bridge installation threw an exception; transport stopped");
+            stopInternal();
         }
     }
 
@@ -863,7 +1011,12 @@ public final class WebProxyTransport implements ForegroundDetector.Listener, Web
                     return;
                 }
                 replyProxy = sourceReplyProxy;
-                pageToken = engine.pageInit();
+                if (useArrayBuffer) {
+                    bridgeReady = true;
+                    pageToken = engine.pageInit();
+                } else {
+                    installBase64Bridge(webView, sourceReplyProxy);
+                }
                 return;
             }
             if (replyProxy != null && replyProxy != sourceReplyProxy) {
@@ -890,6 +1043,7 @@ public final class WebProxyTransport implements ForegroundDetector.Listener, Web
         webView = null;
         replyProxy = null;
         pageToken = 0;
+        bridgeReady = false;
         PagePort port;
         synchronized (portLock) {
             port = pagePort;

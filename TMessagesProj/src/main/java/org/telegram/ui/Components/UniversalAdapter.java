@@ -701,6 +701,7 @@ public class UniversalAdapter extends AdapterWithDiffUtils {
                     cell.setColors(Theme.key_windowBackgroundWhiteGrayIcon, Theme.key_windowBackgroundWhiteBlackText);
                 }
                 cell.setSubtitle(item.subtext); // plugin Text rows carry a second line; null hides it on recycled cells
+                cell.setDrawLoading(item.locked, 45, true);
                 cell.setEnabled(item.enabled, true);
                 break;
             case VIEW_TYPE_CHECK:

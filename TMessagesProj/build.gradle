@@ -20,6 +20,10 @@ idea {
             file('jni/third_party/libyuv'),
             file('jni/third_party/openh264'),
             file('jni/third_party/xiph'),
+            file('jni/third_party/wamr'),
+            file('jni/third_party/libprisma'),
+            file('jni/third_party/boost-regex'),
+            file('jni/tgcalls'),
             file('jni/tlottie'),
             file('jni/voip/webrtc'),
             file('jni/sqlite')
@@ -55,6 +59,7 @@ dependencies {
     implementation 'com.google.android.gms:play-services-cast-framework:21.4.0'
     implementation "androidx.mediarouter:mediarouter:1.7.0"
     implementation 'com.google.zxing:core:3.5.4'
+    implementation 'com.neovisionaries:nv-websocket-client:2.14'
 
     implementation 'androidx.car.app:app:1.4.0'
     implementation 'androidx.car.app:app-projected:1.4.0'
@@ -101,14 +106,6 @@ dependencies {
 
 //    implementation 'com.google.mlkit:translate:17.0.3'
 
-    constraints {
-        implementation("org.jetbrains.kotlin:kotlin-stdlib-jdk7:1.8.0") {
-            because("kotlin-stdlib-jdk7 is now a part of kotlin-stdlib")
-        }
-        implementation("org.jetbrains.kotlin:kotlin-stdlib-jdk8:1.8.0") {
-            because("kotlin-stdlib-jdk8 is now a part of kotlin-stdlib")
-        }
-    }
     // ZaStoGram plugin engine: Pine — dynamic ART method hooking (Xposed-compatible API).
     // Supports Android 4.4(ART)-15 on arm64/armv7. The :xposed module exposes
     // XC_MethodHook (before/afterHookedMethod + MethodHookParam) used by the bridge.
@@ -209,7 +206,6 @@ android {
     buildToolsVersion '36.0.0'
     ndkVersion "27.2.12479018"
 
-    sourceSets.main.jniLibs.srcDirs = ['./jni/']
 
     externalNativeBuild {
         cmake {
@@ -229,7 +225,6 @@ android {
 
         coreLibraryDesugaringEnabled true
     }
-
 
     defaultConfig {
         minSdkVersion 24 // ZaStoGram: Chaquopy (plugin engine) requires minSdk >= 24
