@@ -4171,6 +4171,10 @@ bool ConnectionSocket::dispatchWssPayloads(std::vector<std::vector<uint8_t>> &pa
             return false;
         }
         onReceivedData(wssBuffer);
+        // Connection::onReceivedData copies what it keeps into its own buffer and never
+        // takes this one over, so the owner returns it (the FakeTLS path does the same
+        // with tlsBuffer). Without this every WSS frame leaked a pooled buffer.
+        wssBuffer->reuse();
         if (isDisconnected()) {
             return false;
         }
@@ -4767,12 +4771,20 @@ void ConnectionSocket::onEvent(uint32_t events) {
             }
             onConnected();
             setConnectedNotified(true, "wss_ready");
+            if (isDisconnected() || currentWssTransport == nullptr) {
+                // onConnected() may close the socket (a failed epoll_ctl in adjustWriteOp),
+                // and closing drops the transport this function keeps using below.
+                return;
+            }
         }
         // Deliver payloads before acting on a transport failure: the frames
         // drained ahead of an EOF may carry the server's transport error code,
         // and MTProto needs it to recover (e.g. regenerate an auth key on -404)
         // instead of blindly reconnecting with the same state.
         if (!dispatchWssPayloads(payloads)) {
+            return;
+        }
+        if (isDisconnected() || currentWssTransport == nullptr) {
             return;
         }
         // Only between packets: cutting a larger answer in the middle would
