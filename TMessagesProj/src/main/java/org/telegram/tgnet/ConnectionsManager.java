@@ -1028,12 +1028,32 @@ public class ConnectionsManager extends BaseController {
                 && !TextUtils.isEmpty(settings.getSecret());
     }
 
-    // poolSize must be a power of two (see FileLoadOperation.downloadConnectionsCount).
-    public static int getMtProxySoftMuxDownloadConnectionType(int requestIndex, int poolSize) {
+    // The classic pair of download connections. Soft mux folds it into one; a WEB
+    // proxy keeps it as is, because its carrier windows, not the number of
+    // connections, bound what is queued.
+    public static int getMtProxySoftMuxDownloadConnectionType(int requestIndex) {
         if (isMtProxySoftMuxEnabled()) {
             return ConnectionTypeDownload;
         }
-        return ConnectionTypeDownload | ((requestIndex & (poolSize - 1)) << 16);
+        return (requestIndex & 1) == 0 ? ConnectionTypeDownload : ConnectionTypeDownload2;
+    }
+
+    // Upstream's wider download pool (DownloadConnectionsCount, for premium users)
+    // is only used on a direct or plain proxy route. Through a WEB proxy or with
+    // MTProxy soft mux downloads keep the classic pair.
+    public static int limitDownloadConnections(int wanted) {
+        if (wanted <= 2) {
+            return wanted;
+        }
+        if (isMtProxySoftMuxEnabled()) {
+            return 2;
+        }
+        SharedPreferences preferences = MessagesController.getGlobalMainSettings();
+        if (preferences.getBoolean("proxy_enabled", false)
+                && ProxySettings.fromSharedPreferences(preferences).getType() == ProxySettings.Type.WEB) {
+            return 2;
+        }
+        return wanted;
     }
 
     public static int getMtProxySoftMuxUploadConnectionType(int requestIndex) {

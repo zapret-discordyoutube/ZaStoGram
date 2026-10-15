@@ -1008,7 +1008,7 @@ public class FileLoadOperation {
                         !isPreloadVideoOperation && !supportsPreloading && preloadPrefixSize == 0;
                 if (useDownloadByteBudget) {
                     boolean premium = UserConfig.getInstance(currentAccount).isPremium();
-                    downloadConnectionsCount = premium ? ConnectionsManager.DownloadConnectionsCount : 2;
+                    downloadConnectionsCount = ConnectionsManager.limitDownloadConnections(premium ? ConnectionsManager.DownloadConnectionsCount : 2);
                     int byteBudget = (premium ? 16 : 2) * 1024 * 1024;
                     currentMaxDownloadRequests = byteBudget / currentDownloadChunkSize;
                 }
@@ -1634,7 +1634,7 @@ public class FileLoadOperation {
                 }
             }
             for (int i = 0; i < waitingDownloadSize.length; i++) {
-                int connectionType = ConnectionsManager.ConnectionTypeDownload | (i << 16);
+                int connectionType = downloadSlotConnectionType(i);
                 if (waitingDownloadSize[i] > 1024 * 1024)  {
                     int datacenterId = isCdn ? cdnDatacenterId : this.datacenterId;
                     ConnectionsManager.getInstance(currentAccount).discardConnection(datacenterId, connectionType);
@@ -2388,7 +2388,7 @@ public class FileLoadOperation {
             }
         }
         for (int i = 0; i < waitingDownloadSize.length; i++) {
-            int connectionType = ConnectionsManager.ConnectionTypeDownload | (i << 16);
+            int connectionType = downloadSlotConnectionType(i);
             if (waitingDownloadSize[i] > 512 * 1024 * 2)  {
                 int datacenterId = isCdn ? cdnDatacenterId : this.datacenterId;
                 ConnectionsManager.getInstance(currentAccount).discardConnection(datacenterId, connectionType);
@@ -2442,6 +2442,13 @@ public class FileLoadOperation {
             FileLog.d("debug_loading: " + cacheFileFinal.getName() + " file reference expired ");
         }
         FileRefController.getInstance(currentAccount).requestReference(parentObject, location, this, requestInfo);
+    }
+
+    // Slots 0 and 1 are the classic pair (soft mux aware); the rest is upstream's wider pool.
+    private static int downloadSlotConnectionType(int i) {
+        return i < 2
+                ? ConnectionsManager.getMtProxySoftMuxDownloadConnectionType(i)
+                : ConnectionsManager.ConnectionTypeDownload | (i << 16);
     }
 
     protected void startDownloadRequest(int useConnectionType) {
@@ -2605,8 +2612,11 @@ public class FileLoadOperation {
                 connectionType = ConnectionsManager.ConnectionTypeDownload | (slot << 16);
             } else if (useConnectionType == -1) {
                 // Both pool sizes are powers of two; keep the index valid if the counter wraps.
-                // ZaStoGram: with MTProxy soft mux everything stays on the first download connection.
-                connectionType = ConnectionsManager.getMtProxySoftMuxDownloadConnectionType(requestsCount, downloadConnectionsCount);
+                // ZaStoGram: the classic pair goes through the MTProxy soft mux policy
+                // (a WEB proxy and soft mux never get the wider pool, see limitDownloadConnections).
+                connectionType = downloadConnectionsCount > 2
+                        ? downloadSlotConnectionType(requestsCount & (downloadConnectionsCount - 1))
+                        : ConnectionsManager.getMtProxySoftMuxDownloadConnectionType(requestsCount);
                 //globalRequestPointer++;
             } else {
                 connectionType = useConnectionType;

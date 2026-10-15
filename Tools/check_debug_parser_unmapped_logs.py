@@ -79,8 +79,11 @@ def main() -> int:
     require(
         "case 0x96a18d5:" in tlrpc
         and "TL_upload_file" in tlrpc
-        and "case 0x78d4dec1:" in tlrpc
-        and "TL_updateShort" in tlrpc,
+        # Upstream 13.0 dispatches Updates by the class constants (case TL_updateShort.constructor:)
+        # instead of the numeric literal; accept both, as long as the class still carries 0x78d4dec1.
+        and ("case 0x78d4dec1:" in tlrpc
+             or ("case TL_updateShort.constructor:" in tlrpc
+                 and "class TL_updateShort extends Updates {\n        public static final int constructor = 0x78d4dec1;" in tlrpc)),
         "Java TL schema must already know the repeated upload.File/updateShort constructors that native debug parser may skip",
         failures,
     )
