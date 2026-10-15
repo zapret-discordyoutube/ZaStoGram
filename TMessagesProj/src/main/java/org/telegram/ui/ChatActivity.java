@@ -3249,6 +3249,7 @@ public class ChatActivity extends BaseFragment implements
             return;
         }
         if (!TextUtils.equals(searchingHashtag, hashtag)) {
+            zaSearchSelection().clear(); // ZaSto: новый тег — выделение прошлой выдачи не нужно
             createSearchHashtagViewsIfNeeded();
             showMessagesSearchListView(true);
             searchingHashtag = hashtag;
@@ -3266,6 +3267,77 @@ public class ChatActivity extends BaseFragment implements
             updateSearchListEmptyView();
             hashtagSearchEmptyView.showProgress(true);
             firstLoadMessages();
+        }
+    }
+
+    // ZaSto: выделение найденных сообщений в списке результатов поиска (хэштеги, «Мои сообщения», «Публичные посты»,
+    // посты канала, поиск списком). Вся логика в ZaStoSearchSelection, здесь только доступ к списку и поиску страницы.
+    /** Фрагмент, на чьём ActionBar показывается выделение, если результаты встроены не в чат (HashtagActivity). */
+    public BaseFragment zaSearchSelectionHost;
+    private ZaStoSearchSelection zaSearchSelection;
+
+    /** Выделение общее для корневого чата и всех его встроенных страниц результатов. */
+    public ZaStoSearchSelection zaSearchSelection() {
+        if (parentChatActivity != null) {
+            return parentChatActivity.zaSearchSelection();
+        }
+        if (zaSearchSelection == null) {
+            zaSearchSelection = new ZaStoSearchSelection(this);
+        }
+        return zaSearchSelection;
+    }
+
+    public BaseFragment zaSearchSelectionHostFragment() {
+        return zaSearchSelectionHost != null ? zaSearchSelectionHost : this;
+    }
+
+    /** Клик по кнопке action mode выделения результатов (для HashtagActivity, у которой свой ActionBar). */
+    public boolean zaSearchSelectionOnActionBarItemClick(int id) {
+        return zaSearchSelection != null && zaSearchSelection.onActionBarItemClick(id);
+    }
+
+    /** Выделение результатов активно (для HashtagActivity). */
+    public boolean zaSearchSelectionIsActive() {
+        return zaSearchSelection != null && zaSearchSelection.isActive();
+    }
+
+    /** Action mode с тегом заменил штатный action mode чата: забываем его вью, чат создаст свой заново. */
+    public void zaOnActionModeReplaced() {
+        selectedMessagesCountTextView = null;
+        actionModeViews.clear();
+    }
+
+    /** Все найденные сообщения этой страницы, в том числе скрытые части альбомов. */
+    public ArrayList<MessageObject> zaGetSearchResults() {
+        return messagesSearchAdapter != null ? messagesSearchAdapter.getSourceMessages() : null;
+    }
+
+    /** Сколько всего найдено по версии сервера. */
+    public int zaSearchTotalCount() {
+        return chatMode == MODE_SEARCH ? HashtagSearchController.getInstance(currentAccount).getCount(searchType) : getMediaDataController().getSearchCount();
+    }
+
+    /** Есть ли ещё не подгруженные результаты. */
+    public boolean zaSearchHasMore() {
+        return chatMode == MODE_SEARCH ? !endReached[0] : !getMediaDataController().searchEndReached();
+    }
+
+    /** Догрузить следующую порцию результатов тем же запросом, что и прокрутка списка. */
+    public void zaLoadMoreSearchResults() {
+        if (chatMode == MODE_SEARCH) {
+            if (!loading && !endReached[0]) {
+                loading = true;
+                waitingForLoad.add(lastLoadIndex);
+                HashtagSearchController.getInstance(currentAccount).searchHashtag(searchingHashtag, classGuid, searchType, lastLoadIndex++);
+            }
+        } else {
+            getMediaDataController().loadMoreSearchMessages(true);
+        }
+    }
+
+    public void zaRefreshSearchSelectionRows(boolean animated) {
+        if (messagesSearchAdapter != null && messagesSearchListView != null) {
+            messagesSearchAdapter.zaUpdateCheckedRows(messagesSearchListView, animated);
         }
     }
 
@@ -3752,6 +3824,9 @@ public class ChatActivity extends BaseFragment implements
         actionBar.setActionBarMenuOnItemClick(new ActionBar.ActionBarMenuOnItemClick() {
             @Override
             public void onItemClick(final int id) {
+                if (zaSearchSelection != null && zaSearchSelection.onActionBarItemClick(id)) { // ZaSto
+                    return;
+                }
                 if (id == -1) {
                     if (isInPollAddOptionMode()) {
                         pollAddOptionModeClose();
@@ -7654,6 +7729,10 @@ public class ChatActivity extends BaseFragment implements
         messagesSearchListView.setItemAnimator(itemAnimator);
         messagesSearchListContainer.addView(messagesSearchListView, LayoutHelper.MATCH_PARENT, LayoutHelper.MATCH_PARENT);
         messagesSearchListView.setOnItemClickListener((view, position) -> {
+            // ZaSto: пока идёт выделение, тап по результату отмечает/снимает его
+            if (zaSearchSelection().onItemClick(ChatActivity.this, messagesSearchAdapter.getItem(position))) {
+                return;
+            }
             if (chatMode == MODE_SEARCH) {
                 Object obj = messagesSearchAdapter.getItem(position);
                 if (position == 0 && messagesSearchAdapter.containsStories && messagesSearchAdapter.storiesList != null) {
@@ -7691,6 +7770,8 @@ public class ChatActivity extends BaseFragment implements
                 showMessagesSearchListView(false);
             }
         });
+        // ZaSto: долгое нажатие на результат начинает выделение
+        messagesSearchListView.setOnItemLongClickListener((view, position) -> zaSearchSelection().onItemLongClick(ChatActivity.this, view, messagesSearchAdapter.getItem(position)));
         messagesSearchListView.setOnScrollListener(new RecyclerView.OnScrollListener() {
             @Override
             public void onScrolled(RecyclerView recyclerView, int dx, int dy) {
@@ -7746,6 +7827,7 @@ public class ChatActivity extends BaseFragment implements
                 @Override
                 protected void onTabScrollEnd(int position) {
                     super.onTabScrollEnd(position);
+                    zaSearchSelection().clear(); // ZaSto: выделение относится к одной вкладке результатов
                     if (position == 0 && requestClearSearchPages) {
                         requestClearSearchPages = false;
                         searchViewPager.clearViews();
@@ -35224,6 +35306,9 @@ public class ChatActivity extends BaseFragment implements
         } else if (forwardingPreviewView != null && forwardingPreviewView.isShowing()) {
             if (invoked) forwardingPreviewView.dismiss(true);
             return false;
+        } else if (zaSearchSelection != null && zaSearchSelection.isActive()) { // ZaSto
+            if (invoked) zaSearchSelection.clear();
+            return false;
         } else if (isMessagesSearchListVisible()) {
             if (invoked) showMessagesSearchListView(false);
             return false;
@@ -35728,6 +35813,7 @@ public class ChatActivity extends BaseFragment implements
             AndroidUtilities.runOnUIThread(() -> openHashtagSearch(hashtag), 200);
             return;
         }
+        zaSearchSelection().clear(); // ZaSto: новый поиск по тегу — выделение прошлой выдачи не нужно
         searchingHashtag = hashtag;
         searchingQuery = searchingHashtag;
         boolean channelHashtags = hashtag.contains("@");

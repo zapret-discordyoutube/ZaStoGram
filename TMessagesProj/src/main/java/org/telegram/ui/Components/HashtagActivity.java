@@ -138,6 +138,9 @@ public class HashtagActivity extends BaseFragment implements NotificationCenter.
         actionBar.setActionBarMenuOnItemClick(new ActionBar.ActionBarMenuOnItemClick() {
             @Override
             public void onItemClick(int id) {
+                if (chatContainer != null && chatContainer.chatActivity.zaSearchSelectionOnActionBarItemClick(id)) { // ZaSto
+                    return;
+                }
                 if (id == -1) {
                     finishFragment();
                 }
@@ -173,6 +176,7 @@ public class HashtagActivity extends BaseFragment implements NotificationCenter.
             }
         };
 
+        chatContainer.chatActivity.zaSearchSelectionHost = this; // ZaSto: выделение результатов показывает action mode на ActionBar этого экрана
         contentView.addView(chatContainer, LayoutHelper.createFrame(LayoutHelper.MATCH_PARENT, LayoutHelper.MATCH_PARENT, Gravity.FILL));
 
         sharedMediaLayout = new SharedMediaLayout(context, 0, new SharedMediaLayout.SharedMediaPreloader(null), 0, null, null, null, SharedMediaLayout.TAB_STORIES, 0, this, new SharedMediaLayout.Delegate() {
@@ -399,6 +403,18 @@ public class HashtagActivity extends BaseFragment implements NotificationCenter.
         transitAnimator.setDuration(320);
         transitAnimator.setInterpolator(CubicBezierInterpolator.EASE_OUT_QUINT);
         transitAnimator.start();
+    }
+
+    @Override
+    public boolean onBackPressed(boolean invoked) {
+        // ZaSto: «назад» сначала снимает выделение результатов
+        if (chatContainer != null && chatContainer.chatActivity.zaSearchSelectionIsActive()) {
+            if (invoked) {
+                chatContainer.chatActivity.zaSearchSelectionOnActionBarItemClick(-1);
+            }
+            return false;
+        }
+        return super.onBackPressed(invoked);
     }
 
     @Override

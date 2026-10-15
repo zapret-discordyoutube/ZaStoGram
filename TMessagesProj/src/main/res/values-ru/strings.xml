@@ -451,6 +451,11 @@
     <string name="ZaStoVideoBrightness">Яркость</string>
     <string name="ZaStoVideoVolume">Громкость</string>
     <string name="ZaStoCollapsibleBlock">Сворачиваемый блок (спойлер)</string>
+    <!-- ZaStoGram — выделение найденных сообщений (в т.ч. по хэштегу) -->
+    <string name="ZaStoSearchSelectLimit">За один раз можно выбрать не более %1$d сообщений.</string>
+    <string name="ZaStoSearchSelectPartial">Выбрано %1$d из %2$d найденных. За один раз можно выбрать не более %3$d сообщений.</string>
+    <string name="ZaStoSearchSelectSkipped">Пропущены сообщения, которые нельзя переслать: %1$d</string>
+    <string name="ZaStoSearchSelectNothingToForward">Выбранные сообщения нельзя переслать.</string>
     <!-- exteraGram ABI: read by DEX plugins (re:extera) via R.string -->
     <string name="RestartRequired">Перезапустите приложение, чтобы применить изменения</string>
     <string name="MainMenuHiddenItems">Скрытые пункты</string>
