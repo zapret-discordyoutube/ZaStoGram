@@ -6462,6 +6462,15 @@
     <string name="ZaStoSearchSelectPartial">Selected %1$d of %2$d found. Up to %3$d messages can be selected at once.</string>
     <string name="ZaStoSearchSelectSkipped">Skipped messages that can\'t be forwarded: %1$d</string>
     <string name="ZaStoSearchSelectNothingToForward">None of the selected messages can be forwarded.</string>
+    <string name="ZaStoAppendMedia">Add media</string>
+    <string name="ZaStoAppendMediaChoiceTitle">What to do with the media?</string>
+    <string name="ZaStoAppendMediaConfirm">The message will be sent again as an album: the original will be deleted and will appear as new for everyone in the chat (its date, reactions and replies will not be kept).</string>
+    <string name="ZaStoAppendMediaFull">An album can contain at most 10 items, and this one is already full.</string>
+    <string name="ZaStoAppendMediaTooMany">An album can contain at most 10 items. You can add no more than %1$d.</string>
+    <string name="ZaStoAppendMediaMix">Photos and videos cannot be mixed with files or audio in one album.</string>
+    <string name="ZaStoAppendMediaUnsupported">Media cannot be added to this message. Only photos and videos in your own messages are supported.</string>
+    <string name="ZaStoAppendMediaNoDelete">You can add media only to your own messages that you can delete for everyone.</string>
+    <string name="ZaStoAppendMediaNoSchedule">Scheduling is not available when adding media to a message.</string>
     <string name="DynamicPackOrder">Dynamic Pack Order</string>
     <string name="DynamicPackOrderInfo">Automatically place recently used sticker packs at the front of the panel.</string>
     <string name="DynamicPackOrderOff">Dynamic Order Off</string>

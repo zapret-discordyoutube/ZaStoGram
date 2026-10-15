@@ -650,6 +650,8 @@ public class SendMessagesHelper extends BaseController implements NotificationCe
         public long livePhotoVideoOffset;
         public long livePhotoTimestampUs;
         public int pollIndex;
+        // ZaSto: «добавить медиа» — id группы (альбома), открытой ZaStoAppendMedia; читается у первого элемента списка.
+        public long zaForcedGroupId;
     }
 
     @SuppressLint("MissingPermission")
@@ -6238,6 +6240,7 @@ public class SendMessagesHelper extends BaseController implements NotificationCe
                             PollAttachedMediaPack.setAttachPath(firstMessage, newMsg.attachPath, pollIndex);
                         }
                         delayedMessage.messageObjects.add(newMsgObj);
+                        ZaStoAppendMedia.onGroupMessageCreated(groupId, newMsg.id); // ZaSto
                         delayedMessage.messages.add(newMsg);
                         delayedMessage.parentObjects.add(parentObject);
                         delayedMessage.locations.add(delayedMessage.photoSize);
@@ -11036,6 +11039,7 @@ public class SendMessagesHelper extends BaseController implements NotificationCe
         }
         final long forcedPollGroupId = pollSendParams != null ? pollSendParams.groupId : 0;
         final boolean forceDisableCheckSentMedia = forcedPollGroupId != 0;
+        final long zaForcedGroupId = media.get(0).zaForcedGroupId; // ZaSto: см. ZaStoAppendMedia
         final boolean groupMediaFinal = groupMedia;
         mediaSendQueue.postRunnable(() -> {
             long beginTime = System.currentTimeMillis();
@@ -11186,6 +11190,10 @@ public class SendMessagesHelper extends BaseController implements NotificationCe
                 final boolean last = mediaCount == 0;
                 if (forcedPollGroupId != 0) {
                     lastGroupId = groupId = forcedPollGroupId;
+                    mediaCount = 0;
+                } else if (zaForcedGroupId != 0 && groupMediaFinal) {
+                    // ZaSto: новые файлы входят в альбом, где уже лежат исходные медиа (даже если новый файл один)
+                    lastGroupId = groupId = zaForcedGroupId;
                     mediaCount = 0;
                 } else if (groupMediaFinal && count > 1 && mediaCount % 10 == 0) {
                     lastGroupId = groupId = Utilities.random.nextLong();

@@ -456,6 +456,15 @@
     <string name="ZaStoSearchSelectPartial">Выбрано %1$d из %2$d найденных. За один раз можно выбрать не более %3$d сообщений.</string>
     <string name="ZaStoSearchSelectSkipped">Пропущены сообщения, которые нельзя переслать: %1$d</string>
     <string name="ZaStoSearchSelectNothingToForward">Выбранные сообщения нельзя переслать.</string>
+    <string name="ZaStoAppendMedia">Добавить медиа</string>
+    <string name="ZaStoAppendMediaChoiceTitle">Что сделать с медиа?</string>
+    <string name="ZaStoAppendMediaConfirm">Сообщение будет отправлено заново как альбом: исходное удалится, у собеседников оно появится как новое (дата, реакции и ответы на него не сохранятся).</string>
+    <string name="ZaStoAppendMediaFull">В альбоме может быть не больше 10 элементов, и этот уже заполнен.</string>
+    <string name="ZaStoAppendMediaTooMany">В альбоме может быть не больше 10 элементов. Можно добавить не больше %1$d.</string>
+    <string name="ZaStoAppendMediaMix">Фото и видео нельзя смешивать с файлами и аудио в одном альбоме.</string>
+    <string name="ZaStoAppendMediaUnsupported">К этому сообщению нельзя добавить медиа. Поддерживаются только фото и видео в ваших сообщениях.</string>
+    <string name="ZaStoAppendMediaNoDelete">Добавлять медиа можно только к своим сообщениям, которые можно удалить у всех.</string>
+    <string name="ZaStoAppendMediaNoSchedule">При добавлении медиа к сообщению отложенная отправка недоступна.</string>
     <!-- exteraGram ABI: read by DEX plugins (re:extera) via R.string -->
     <string name="RestartRequired">Перезапустите приложение, чтобы применить изменения</string>
     <string name="MainMenuHiddenItems">Скрытые пункты</string>
