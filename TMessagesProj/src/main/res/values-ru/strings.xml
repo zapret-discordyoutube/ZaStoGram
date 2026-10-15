@@ -450,6 +450,7 @@
     <string name="ZaStoVideoSpeed">Скорость</string>
     <string name="ZaStoVideoBrightness">Яркость</string>
     <string name="ZaStoVideoVolume">Громкость</string>
+    <string name="ZaStoCollapsibleBlock">Сворачиваемый блок (спойлер)</string>
     <!-- exteraGram ABI: read by DEX plugins (re:extera) via R.string -->
     <string name="RestartRequired">Перезапустите приложение, чтобы применить изменения</string>
     <string name="MainMenuHiddenItems">Скрытые пункты</string>

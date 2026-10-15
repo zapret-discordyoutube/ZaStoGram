@@ -43,7 +43,7 @@ public class RichCommand {
         cmds.add(new RichCommand(R.drawable.iv_list, getString(R.string.ArticleCommandList), "-", "/list"));
         cmds.add(new RichCommand(R.drawable.iv_ordered_list, getString(R.string.ArticleCommandOrderedList), "1."));
         cmds.add(new RichCommand(R.drawable.iv_todo, getString(R.string.ArticleListChecklist), "[]", "/todo", "/checklist"));
-        cmds.add(new RichCommand(R.drawable.iv_details, getString(R.string.ArticleCommandToggle), ">", "/toggle", "/details"));
+        cmds.add(new RichCommand(R.drawable.iv_details, getString(R.string.ZaStoCollapsibleBlock), ">", "/toggle", "/details", "/collapse"));
         cmds.add(new RichCommand(R.drawable.iv_button, getString(R.string.RichEditorButton), "/button"));
         cmds.add(new RichCommand(R.drawable.iv_table, getString(R.string.ArticleCommandTable), "/table"));
         cmds.add(new RichCommand(R.drawable.iv_math, getString(R.string.ArticleCommandMath), "/math", "/latex", "/expression"));

@@ -353,6 +353,8 @@ public class ChatAttachAlertRichLayout extends ChatAttachAlert.AttachAlertLayout
         o.addChecked(row != null && row.block instanceof TL_iv.pageBlockPullquote, new RichEditor.RequiresPremiumDrawable(getContext(), R.drawable.iv_pullquote).setPremium(premiumLock), getString(R.string.ArticlePullquote), () -> listView.turnInto(row, RichEditorListView.newPullquote(), 0, 0, false, false));
         o.addChecked(row != null && row.block instanceof TL_iv.pageBlockPreformatted, R.drawable.iv_code, getString(R.string.ArticleCode), () -> listView.turnIntoKeepList(row, new TL_iv.pageBlockPreformatted()));
         o.addChecked(row != null && row.block instanceof TL_iv.pageBlockFooter, new RichEditor.RequiresPremiumDrawable(getContext(), R.drawable.iv_footer).setPremium(premiumLock), getString(R.string.ArticleFooter), () -> listView.turnIntoKeepList(row, new TL_iv.pageBlockFooter()));
+        // ZaStoGram: the collapsible block is also here, not only in Lists
+        o.addChecked(row != null && row.block instanceof TL_iv.pageBlockDetails, R.drawable.iv_details, getString(R.string.ZaStoCollapsibleBlock), listView::insertDetails);
         menu = o.show();
     }
 
@@ -372,7 +374,7 @@ public class ChatAttachAlertRichLayout extends ChatAttachAlert.AttachAlertLayout
             .addChecked(row != null && row.isInList() && !row.isChecklist() && !row.isOrdered(), R.drawable.iv_list, getString(R.string.ArticleListBulleted), () -> listView.turnIntoList(row, 1))
             .addChecked(row != null && row.isInList() && !row.isChecklist() && row.isOrdered(), R.drawable.iv_ordered_list, getString(R.string.ArticleListNumbered), () -> listView.turnIntoList(row, 2))
             .addChecked(row != null && row.isInList() && row.isChecklist() && !row.isOrdered(), R.drawable.iv_todo, getString(R.string.ArticleListTodo), () -> listView.turnIntoList(row, 3))
-            .addChecked(row != null && row.block instanceof TL_iv.pageBlockDetails, R.drawable.iv_details, getString(R.string.ArticleToggleBlock), listView::insertDetails);
+            .addChecked(row != null && row.block instanceof TL_iv.pageBlockDetails, R.drawable.iv_details, getString(R.string.ZaStoCollapsibleBlock), listView::insertDetails);
         final boolean canIndent = listView.canIndentSelection();
         final boolean canOutdent = listView.canOutdentSelection();
         if (canIndent || canOutdent) {
