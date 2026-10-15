@@ -2,29 +2,6 @@ cmake_minimum_required(VERSION 3.6.0)
 
 set(CMAKE_CXX_FLAGS "-std=c++17 -DANDROID -g")
 
-# ZaStoGram: TCP/TLS fallback for call relays is carried as a patch over the upstream
-# tgcalls submodule (jni/tgcalls). Applied idempotently before the sources are compiled.
-set(ZASTO_TGCALLS_PATCH ${CMAKE_HOME_DIRECTORY}/voip/patches/tgcalls-relay-tcp-tls.patch)
-if (EXISTS ${ZASTO_TGCALLS_PATCH} AND EXISTS ${CMAKE_HOME_DIRECTORY}/tgcalls/tgcalls/Instance.h)
-    find_program(ZASTO_GIT git)
-    if (NOT ZASTO_GIT)
-        message(FATAL_ERROR "git is required to apply ${ZASTO_TGCALLS_PATCH}")
-    endif ()
-    execute_process(COMMAND ${ZASTO_GIT} apply --check --reverse ${ZASTO_TGCALLS_PATCH}
-            WORKING_DIRECTORY ${CMAKE_HOME_DIRECTORY}/tgcalls
-            RESULT_VARIABLE ZASTO_TGCALLS_ALREADY_PATCHED
-            OUTPUT_QUIET ERROR_QUIET)
-    if (NOT ZASTO_TGCALLS_ALREADY_PATCHED EQUAL 0)
-        execute_process(COMMAND ${ZASTO_GIT} apply ${ZASTO_TGCALLS_PATCH}
-                WORKING_DIRECTORY ${CMAKE_HOME_DIRECTORY}/tgcalls
-                RESULT_VARIABLE ZASTO_TGCALLS_PATCH_RESULT
-                ERROR_VARIABLE ZASTO_TGCALLS_PATCH_ERROR)
-        if (NOT ZASTO_TGCALLS_PATCH_RESULT EQUAL 0)
-            message(FATAL_ERROR "Cannot apply tgcalls-relay-tcp-tls.patch to the tgcalls submodule: ${ZASTO_TGCALLS_PATCH_ERROR}")
-        endif ()
-    endif ()
-endif ()
-set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS ${ZASTO_TGCALLS_PATCH})
 
 #openh264 (prebuilt static library)
 add_library(openh264 STATIC IMPORTED)
