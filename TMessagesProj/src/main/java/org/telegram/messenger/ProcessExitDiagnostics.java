@@ -19,7 +19,10 @@ import java.io.FileOutputStream;
 import java.io.PrintWriter;
 import java.io.StringWriter;
 import java.nio.charset.StandardCharsets;
+import java.text.SimpleDateFormat;
+import java.util.Date;
 import java.util.List;
+import java.util.Locale;
 
 /** Records Android's reason for the previous process death in the next session log. */
 public final class ProcessExitDiagnostics {
@@ -35,6 +38,15 @@ public final class ProcessExitDiagnostics {
     private static final String CRASH_FILE = "zasto_last_crash.txt";
     private static final int MAX_CRASH_BYTES = 32 * 1024;
     private static volatile boolean crashRecorderInstalled;
+
+    // The stable build ships with logging off, so a tester whose app dies at
+    // launch had nothing to send (report of 13.10.2026). The same death
+    // records are therefore kept without the log switch, in one small file in
+    // the logs folder - the "Logs" screen lists it and can send it. Only
+    // crash-like exits are written; a normal swipe-away or an update is not.
+    private static final String CRASH_REPORT_FILE = "zasto_crash_report.txt";
+    private static final int MAX_CRASH_REPORT_BYTES = 96 * 1024;
+    private static final int MAX_EXITS_PER_LAUNCH = 4;
 
     private ProcessExitDiagnostics() {
     }
@@ -67,10 +79,13 @@ public final class ProcessExitDiagnostics {
     }
 
     public static void logPreviousCrashStack(Context context) {
-        if (!BuildVars.LOGS_ENABLED || context == null) {
+        if (context == null) {
             return;
         }
-        File file = new File(context.getFilesDir(), CRASH_FILE);
+        logCrashStackFile(context, new File(context.getFilesDir(), CRASH_FILE));
+    }
+
+    private static void logCrashStackFile(Context context, File file) {
         if (!file.exists()) {
             return;
         }
@@ -84,15 +99,139 @@ public final class ProcessExitDiagnostics {
                 }
                 read += count;
             }
-            FileLog.persistDiagnostic("previous_crash_stack " + new String(bytes, 0, read, StandardCharsets.UTF_8));
+            emit(context, "previous_crash_stack " + new String(bytes, 0, read, StandardCharsets.UTF_8));
         } catch (Throwable t) {
             FileLog.e("previous_crash_stack unavailable", t);
         }
         file.delete();
     }
 
+    /**
+     * Logging is off in a stable build, so the log has nowhere to carry the previous death.
+     * Called from Application.onCreate before the new crash recorder is installed: the old
+     * stack file is moved aside at once (a launch that dies within milliseconds would
+     * overwrite it), and the rest runs on a worker thread to keep the start path short.
+     */
+    public static void recordPreviousDeathWithoutLogs(final Context context) {
+        if (context == null || BuildVars.LOGS_ENABLED) {
+            return;
+        }
+        File moved = null;
+        try {
+            File file = new File(context.getFilesDir(), CRASH_FILE);
+            if (file.exists()) {
+                File target = new File(context.getFilesDir(), CRASH_FILE + ".prev");
+                if (file.renameTo(target)) {
+                    moved = target;
+                }
+            }
+        } catch (Throwable ignore) {
+        }
+        final File stackFile = moved;
+        Thread worker = new Thread(() -> {
+            try {
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                    logPreviousExit(context);
+                }
+                if (stackFile != null) {
+                    logCrashStackFile(context, stackFile);
+                }
+            } catch (Throwable ignore) {
+            }
+        }, "zasto_death_report");
+        worker.setDaemon(true);
+        worker.start();
+    }
+
+    private static void emit(Context context, String message) {
+        if (BuildVars.LOGS_ENABLED) {
+            FileLog.persistDiagnostic(message);
+        } else {
+            appendCrashReport(context, message);
+        }
+    }
+
+    private static boolean headerWritten;
+
+    private static synchronized void appendCrashReport(Context context, String message) {
+        try {
+            File dir = AndroidUtilities.getLogsDir();
+            if (dir == null) {
+                return;
+            }
+            File file = new File(dir, CRASH_REPORT_FILE);
+            SimpleDateFormat format = new SimpleDateFormat("dd.MM.yyyy HH:mm:ss.SSS", Locale.US);
+            StringBuilder text = new StringBuilder();
+            if (!headerWritten) {
+                headerWritten = true;
+                String version = "?";
+                try {
+                    android.content.pm.PackageInfo info = context.getPackageManager().getPackageInfo(context.getPackageName(), 0);
+                    version = info.versionName + " (" + info.versionCode + ")";
+                } catch (Throwable ignore) {
+                }
+                text.append("----- launch ").append(format.format(new Date()))
+                        .append(" app=").append(context.getPackageName()).append(' ').append(version)
+                        .append(" device=").append(Build.MANUFACTURER).append(' ').append(Build.MODEL)
+                        .append(" android=").append(Build.VERSION.RELEASE).append('/').append(Build.VERSION.SDK_INT)
+                        .append(" abi=").append(Build.SUPPORTED_ABIS.length > 0 ? Build.SUPPORTED_ABIS[0] : "?")
+                        .append(" -----\n");
+            }
+            text.append(format.format(new Date())).append(' ').append(message).append('\n');
+            byte[] add = text.toString().getBytes(StandardCharsets.UTF_8);
+            byte[] keep = new byte[0];
+            if (file.exists() && file.length() + add.length > MAX_CRASH_REPORT_BYTES) {
+                // Keep the newer half and start from a whole line.
+                int tail = MAX_CRASH_REPORT_BYTES / 2;
+                try (java.io.RandomAccessFile raf = new java.io.RandomAccessFile(file, "r")) {
+                    long length = raf.length();
+                    int size = (int) Math.min(length, tail);
+                    byte[] buffer = new byte[size];
+                    raf.seek(length - size);
+                    raf.readFully(buffer);
+                    int start = 0;
+                    if (length > size) {
+                        while (start < size && buffer[start] != '\n') {
+                            start++;
+                        }
+                        start = Math.min(start + 1, size);
+                    }
+                    keep = java.util.Arrays.copyOfRange(buffer, start, size);
+                }
+                try (FileOutputStream out = new FileOutputStream(file, false)) {
+                    out.write(keep);
+                    out.write(add, 0, Math.min(add.length, MAX_CRASH_REPORT_BYTES / 2));
+                }
+            } else {
+                try (FileOutputStream out = new FileOutputStream(file, true)) {
+                    out.write(add, 0, Math.min(add.length, MAX_CRASH_REPORT_BYTES));
+                }
+            }
+        } catch (Throwable ignore) {
+        }
+    }
+
+    public static boolean isCrashReportFile(File file) {
+        return file != null && CRASH_REPORT_FILE.equals(file.getName());
+    }
+
+    // Low-memory and signal kills of a background process are normal Android life, so they stay
+    // out of the report; with logging on they are still logged as the newest exit.
+    private static boolean isCrashLike(int reason) {
+        switch (reason) {
+            case ApplicationExitInfo.REASON_CRASH:
+            case ApplicationExitInfo.REASON_CRASH_NATIVE:
+            case ApplicationExitInfo.REASON_ANR:
+            case ApplicationExitInfo.REASON_INITIALIZATION_FAILURE:
+            case ApplicationExitInfo.REASON_EXCESSIVE_RESOURCE_USAGE:
+                return true;
+            default:
+                return false;
+        }
+    }
+
     public static void logPreviousExit(Context context) {
-        if (!BuildVars.LOGS_ENABLED || Build.VERSION.SDK_INT < Build.VERSION_CODES.R || context == null) {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R || context == null) {
             return;
         }
         try {
@@ -105,7 +244,9 @@ public final class ProcessExitDiagnostics {
             SharedPreferences preferences = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE);
             String key = LAST_REPORTED_PREFIX + processName.replace(':', '_');
             long lastReported = preferences.getLong(key, 0);
+            long newestTimestamp = 0;
             ApplicationExitInfo newest = null;
+            java.util.ArrayList<ApplicationExitInfo> crashes = new java.util.ArrayList<>();
             List<ApplicationExitInfo> exits = activityManager.getHistoricalProcessExitReasons(
                     context.getPackageName(), 0, 16);
             for (ApplicationExitInfo exit : exits) {
@@ -113,27 +254,43 @@ public final class ProcessExitDiagnostics {
                         || !TextUtils.equals(processName, exit.getProcessName())) {
                     continue;
                 }
+                newestTimestamp = Math.max(newestTimestamp, exit.getTimestamp());
                 if (newest == null || exit.getTimestamp() > newest.getTimestamp()) {
                     newest = exit;
+                }
+                if (isCrashLike(exit.getReason())) {
+                    crashes.add(exit);
                 }
             }
             if (newest == null) {
                 return;
             }
-            FileLog.persistDiagnostic("previous_process_exit process=" + processName
-                    + " reason=" + reasonName(newest.getReason())
-                    + " reason_code=" + newest.getReason()
-                    + " status=" + newest.getStatus()
-                    + " importance=" + newest.getImportance()
-                    + " pss_kb=" + newest.getPss()
-                    + " rss_kb=" + newest.getRss()
-                    + " timestamp_ms=" + newest.getTimestamp()
-                    + " description=" + safeDescription(newest.getDescription()));
-            if (newest.getReason() == ApplicationExitInfo.REASON_CRASH_NATIVE
-                    && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-                logNativeCrashStack(newest);
+            // With logging on, the log carries the newest exit as before. Without it, a crash
+            // may be followed by a force stop or an update, so every crash-like exit is kept.
+            java.util.ArrayList<ApplicationExitInfo> report = new java.util.ArrayList<>();
+            if (BuildVars.LOGS_ENABLED) {
+                report.add(newest);
+            } else {
+                java.util.Collections.sort(crashes, (x, y) -> Long.compare(x.getTimestamp(), y.getTimestamp()));
+                int from = Math.max(0, crashes.size() - MAX_EXITS_PER_LAUNCH);
+                report.addAll(crashes.subList(from, crashes.size()));
             }
-            preferences.edit().putLong(key, newest.getTimestamp()).commit();
+            for (ApplicationExitInfo exit : report) {
+                emit(context, "previous_process_exit process=" + processName
+                        + " reason=" + reasonName(exit.getReason())
+                        + " reason_code=" + exit.getReason()
+                        + " status=" + exit.getStatus()
+                        + " importance=" + exit.getImportance()
+                        + " pss_kb=" + exit.getPss()
+                        + " rss_kb=" + exit.getRss()
+                        + " timestamp_ms=" + exit.getTimestamp()
+                        + " description=" + safeDescription(exit.getDescription()));
+                if (exit.getReason() == ApplicationExitInfo.REASON_CRASH_NATIVE
+                        && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                    logNativeCrashStack(context, exit);
+                }
+            }
+            preferences.edit().putLong(key, newestTimestamp).commit();
         } catch (Throwable t) {
             FileLog.e("previous_process_exit unavailable", t);
         }
@@ -145,10 +302,10 @@ public final class ProcessExitDiagnostics {
     // the abort message and the crashing thread's backtrace are taken from it.
     private static final int MAX_NATIVE_FRAMES = 32;
 
-    private static void logNativeCrashStack(ApplicationExitInfo exit) {
+    private static void logNativeCrashStack(Context context, ApplicationExitInfo exit) {
         try (java.io.InputStream in = exit.getTraceInputStream()) {
             if (in == null) {
-                FileLog.persistDiagnostic("previous_native_crash_stack unavailable=no_trace");
+                emit(context, "previous_native_crash_stack unavailable=no_trace");
                 return;
             }
             java.io.ByteArrayOutputStream buffer = new java.io.ByteArrayOutputStream();
@@ -157,7 +314,7 @@ public final class ProcessExitDiagnostics {
             while ((count = in.read(chunk)) > 0 && buffer.size() < 4 * 1024 * 1024) {
                 buffer.write(chunk, 0, count);
             }
-            FileLog.persistDiagnostic("previous_native_crash_stack " + formatTombstone(buffer.toByteArray()));
+            emit(context, "previous_native_crash_stack " + formatTombstone(buffer.toByteArray()));
         } catch (Throwable t) {
             FileLog.e("previous_native_crash_stack unavailable", t);
         }

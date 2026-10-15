@@ -446,7 +446,8 @@ public class FileLog {
             }
             ArrayList<File> all = new ArrayList<>();
             for (File f : arr) {
-                if (f != null && f.isFile() && !"logs.zip".equals(f.getName())) {
+                if (f != null && f.isFile() && !"logs.zip".equals(f.getName())
+                        && !ProcessExitDiagnostics.isCrashReportFile(f)) {
                     all.add(f);
                 }
             }
