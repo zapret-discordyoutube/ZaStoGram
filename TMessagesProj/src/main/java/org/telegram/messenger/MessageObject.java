@@ -9993,7 +9993,24 @@ public class MessageObject {
         return 0;
     }
 
+    // ZaSto: cloud (non-secret-chat) self-destruct photo/video kept via KEEP_EPHEMERAL is stored as plain media,
+    // exactly like ordinary media (normal dir + file database, no ".enc"), so download state and "save" see the file.
+    // Voice-once / round-once keep their own encrypted handling.
+    public static boolean zastoPlainEphemeral(TLRPC.Message message) {
+        if (!ZaStoPrivacy.KEEP_EPHEMERAL || !(message instanceof TLRPC.TL_message) || message instanceof TLRPC.TL_message_secret || message instanceof TLRPC.TL_message_secret_layer72) {
+            return false;
+        }
+        TLRPC.MessageMedia media = getMedia(message);
+        if (media == null || media.ttl_seconds == 0) {
+            return false;
+        }
+        return !(media.ttl_seconds == 0x7FFFFFFF && (isVoiceDocument(getDocument(message)) || isRoundVideoMessage(message)));
+    }
+
     public static boolean shouldEncryptPhotoOrVideo(int currentAccount, TLRPC.Message message) {
+        if (zastoPlainEphemeral(message)) {
+            return false;
+        }
         if (message != null && message.media != null && (isVoiceDocument(getDocument(message)) || isRoundVideoMessage(message)) && message.media.ttl_seconds == 0x7FFFFFFF) {
             return true;
         }
