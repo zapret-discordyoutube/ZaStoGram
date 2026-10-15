@@ -21,6 +21,7 @@
 #include <string>
 #include <cinttypes>
 #include <map>
+#include <mutex>
 #include "ConnectionsManager.h"
 #include "DownloadRequestBudget.h"
 #include "FileLog.h"
@@ -60,6 +61,8 @@ struct UnmappedConstructorDebugStats {
 };
 
 std::map<uint32_t, UnmappedConstructorDebugStats> unmappedConstructorStats;
+// Every account has its own network thread and all of them log into this one map.
+std::mutex unmappedConstructorStatsMutex;
 
 static int64_t tlDebugMonotonicMillis() {
     struct timespec timeSpec;
@@ -72,6 +75,7 @@ static void logTlDebugUnmappedConstructor(uint32_t constructor, const char *cont
         return;
     }
     int64_t now = tlDebugMonotonicMillis();
+    std::lock_guard<std::mutex> lock(unmappedConstructorStatsMutex);
     UnmappedConstructorDebugStats &stats = unmappedConstructorStats[constructor];
     stats.count++;
     if (stats.lastLogTime == 0 || now - stats.lastLogTime >= TL_UNMAPPED_CONSTRUCTOR_LOG_INTERVAL_MS) {

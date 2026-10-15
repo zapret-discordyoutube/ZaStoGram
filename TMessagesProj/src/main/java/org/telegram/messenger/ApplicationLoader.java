@@ -350,6 +350,11 @@ public class ApplicationLoader extends Application {
         if (applicationContext == null) {
             applicationContext = getApplicationContext();
         }
+        if (!BuildVars.LOGS_ENABLED) {
+            // ZaStoGram: the stable build runs without a log, so the previous crash goes to a
+            // small report file that the Logs screen lists. Must precede the recorder below.
+            ProcessExitDiagnostics.recordPreviousDeathWithoutLogs(applicationContext);
+        }
         ProcessExitDiagnostics.installCrashRecorder(applicationContext);
 
         NativeLoader.initNativeLibs(ApplicationLoader.applicationContext);
