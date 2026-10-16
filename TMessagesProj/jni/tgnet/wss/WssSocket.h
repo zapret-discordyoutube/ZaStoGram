@@ -41,6 +41,9 @@ struct Route {
     // Network the route was chosen on (see SetNetworkType): its failures count
     // against that network only, even when reported after a switch.
     int32_t network = 0;
+    // DC of an official relay route, which picks relayHost from the DC's list
+    // of ingress addresses; 0 for fronts and the tunnel.
+    int32_t relayDcId = 0;
 };
 
 // Wi-Fi and mobile data reach Telegram through different providers, so relay

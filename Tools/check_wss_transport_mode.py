@@ -109,7 +109,7 @@ def main() -> None:
             "official DC2 route must be generated inside the WSS module")
     require('prefix = "kws" + std::to_string(dcId)' in wss_cpp and '"/apiws"' in wss_cpp,
             "WSS module must use the official DC1-DC5 relay catalog")
-    require("officialRelayIpForDc" in wss_cpp
+    require("officialRelayIpsForDc" in wss_cpp
             and "result.relayHostFallback = result.domain" in wss_cpp
             and "result.connectHost = result.viaFallback" in wss_cpp
             and "bool viaFallback = false" in wss_h,

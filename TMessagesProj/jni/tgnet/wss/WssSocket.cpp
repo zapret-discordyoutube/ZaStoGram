@@ -262,6 +262,47 @@ std::string relayAddressHealthName(const std::string &address) {
     return "addr-" + address;
 }
 
+// Telegram Web ingress addresses, not a proxy: the kwsN hostname stays the TLS
+// identity and the last fallback. Each ingress serves only its own DCs. DC2
+// and DC4 have two: DNS names 149.154.167.99 (web.telegram.org too), while
+// 149.154.167.220 is the one every client hardcoded for months. Both carried
+// all four kws2/kws4 names on 16.10.2026, 25 rounds each, with no difference
+// beyond noise. A provider blocking one of them by IP (tg-ws-proxy issue
+// #1450, 15.10.2026) leaves the other, which unlike the DNS fallback can keep
+// pool spares and does not depend on the resolver.
+const std::vector<std::string> &officialRelayIpsForDc(int32_t dcId) {
+    static const std::vector<std::string> dc13 = {"149.154.174.100"};
+    static const std::vector<std::string> dc24 = {"149.154.167.220", "149.154.167.99"};
+    static const std::vector<std::string> dc5 = {"149.154.170.100"};
+    static const std::vector<std::string> none;
+    switch (dcId) {
+        case 1:
+        case 3:
+            return dc13;
+        case 2:
+        case 4:
+            return dc24;
+        case 5:
+            return dc5;
+        default:
+            return none;
+    }
+}
+
+// Which ingress of a DC last delivered data on a network, and when each one
+// failed. A dead address hands the DC to the next ingress before the DNS name.
+// Guarded by relayPreferencesMutex.
+struct RelayAddressState {
+    std::string preferred;
+    std::map<std::string, int64_t> failedAt;
+};
+std::map<std::string, RelayAddressState> relayAddressStates;
+
+std::string relayAddressStateKey(int32_t network, int32_t dcId) {
+    const auto &addresses = officialRelayIpsForDc(dcId);
+    return networkKey(network, "ingress-" + (addresses.empty() ? std::string() : addresses.front()));
+}
+
 bool isRelay(const Route &route) {
     return !route.tunnel && !isCdn(route);
 }
@@ -325,6 +366,79 @@ bool routeSuppressed(int32_t network, const std::string &domain) {
     return true;
 }
 
+// The ingress OfficialRoute dials: the one that last delivered data on this
+// network, else the list order, with addresses that failed in the last two
+// minutes moved back and suppressed ones skipped. With every address down it
+// returns the first, whose suppression then sends the DC down the ladder.
+std::string selectRelayAddress(int32_t network, int32_t dcId) {
+    const auto &addresses = officialRelayIpsForDc(dcId);
+    if (addresses.empty()) {
+        return std::string();
+    }
+    std::vector<std::string> order;
+    {
+        std::lock_guard<std::mutex> lock(relayPreferencesMutex);
+        auto it = relayAddressStates.find(relayAddressStateKey(network, dcId));
+        const std::string preferred = it != relayAddressStates.end() ? it->second.preferred : std::string();
+        if (std::find(addresses.begin(), addresses.end(), preferred) != addresses.end()) {
+            order.push_back(preferred);
+        }
+        for (const auto &address : addresses) {
+            if (address != preferred) {
+                order.push_back(address);
+            }
+        }
+        if (it != relayAddressStates.end()) {
+            const int64_t now = monotonicMillis();
+            std::stable_partition(order.begin(), order.end(), [&](const std::string &address) {
+                auto failed = it->second.failedAt.find(address);
+                return failed == it->second.failedAt.end() || now - failed->second >= kRouteSuppressTtlMs;
+            });
+        }
+    }
+    for (const auto &address : order) {
+        if (!routeSuppressed(network, relayAddressHealthName(address))) {
+            return address;
+        }
+    }
+    return order.front();
+}
+
+// A relay address failed. If the DC has another ingress that has not failed in
+// the last two minutes, the next connection dials it instead of the DNS name,
+// and true is returned; otherwise the caller falls back to the name.
+bool moveToNextRelayAddress(const Route &route) {
+    if (!isRelay(route) || route.viaFallback || route.relayDcId == 0) {
+        return false;
+    }
+    const auto &addresses = officialRelayIpsForDc(route.relayDcId);
+    if (addresses.size() < 2) {
+        return false;
+    }
+    std::lock_guard<std::mutex> lock(relayPreferencesMutex);
+    const int64_t now = monotonicMillis();
+    RelayAddressState &state = relayAddressStates[relayAddressStateKey(route.network, route.relayDcId)];
+    state.failedAt[route.relayHost] = now;
+    for (const auto &address : addresses) {
+        if (address == route.relayHost) {
+            continue;
+        }
+        auto failed = state.failedAt.find(address);
+        if (failed != state.failedAt.end() && now - failed->second < kRouteSuppressTtlMs) {
+            continue;
+        }
+        if (state.preferred != address) {
+            state.preferred = address;
+            if (LOGS_ENABLED) {
+                DEBUG_D("wss_route address_switch dc=%d net=%s from=%s to=%s", route.relayDcId,
+                        networkName(route.network), route.relayHost.c_str(), address.c_str());
+            }
+        }
+        return true;
+    }
+    return false;
+}
+
 void recordRouteUnreachable(const Route &route) {
     std::lock_guard<std::mutex> lock(relayPreferencesMutex);
     RouteHealth &health = routeHealth[networkKey(route.network, healthName(route))];
@@ -382,15 +496,24 @@ void suppressRelayAddressWithDomain(const Route &route) {
     if (domain == routeHealth.end() || domain->second.suppressedUntil <= now) {
         return;
     }
-    Route address = route;
-    address.healthDomain = relayAddressHealthName(route.relayHost);
-    RouteHealth &health = routeHealth[networkKey(route.network, address.healthDomain)];
-    // Only a recent failure of the address itself: a stray SYN loss long ago
-    // must not take a sibling off a working relay (logs (9): kws2 down while
-    // kws4 on the same address kept working).
-    if (health.consecutiveFailures > 0 && health.suppressedUntil <= now
-            && health.lastFailureAt != 0 && now - health.lastFailureAt < 2 * 60 * 1000) {
-        suppressLocked(address, health, now, "domain");
+    // Every ingress the DC went through before the name failed: DC2/DC4 try
+    // both of theirs first.
+    std::vector<std::string> relayAddresses = {route.relayHost};
+    if (route.relayDcId != 0) {
+        relayAddresses = officialRelayIpsForDc(route.relayDcId);
+    }
+    for (const auto &relayAddress : relayAddresses) {
+        Route address = route;
+        address.relayHost = relayAddress;
+        address.healthDomain = relayAddressHealthName(relayAddress);
+        RouteHealth &health = routeHealth[networkKey(route.network, address.healthDomain)];
+        // Only a recent failure of the address itself: a stray SYN loss long ago
+        // must not take a sibling off a working relay (logs (9): kws2 down while
+        // kws4 on the same address kept working).
+        if (health.consecutiveFailures > 0 && health.suppressedUntil <= now
+                && health.lastFailureAt != 0 && now - health.lastFailureAt < 2 * 60 * 1000) {
+            suppressLocked(address, health, now, "domain");
+        }
     }
 }
 
@@ -418,6 +541,11 @@ void recordRouteReachable(const Route &route) {
         if (address != routeHealth.end()) {
             persisted = persisted || address->second.suppressions != 0;
             address->second = RouteHealth();
+        }
+        if (route.relayDcId != 0) {
+            RelayAddressState &state = relayAddressStates[relayAddressStateKey(route.network, route.relayDcId)];
+            state.preferred = route.relayHost;
+            state.failedAt.erase(route.relayHost);
         }
     }
     if (persisted) {
@@ -764,23 +892,6 @@ void setDiagnostic(std::string *diagnostic, const char *value) {
     }
 }
 
-const char *officialRelayIpForDc(int32_t dcId) {
-    // These are direct Telegram Web ingress addresses, not a proxy. The
-    // kwsN hostname remains the TLS identity and the automatic fallback.
-    switch (dcId) {
-        case 1:
-        case 3:
-            return "149.154.174.100";
-        case 2:
-        case 4:
-            return "149.154.167.220";
-        case 5:
-            return "149.154.170.100";
-        default:
-            return nullptr;
-    }
-}
-
 } // namespace
 
 void SetRouteHealthPath(const std::string &path) {
@@ -871,13 +982,16 @@ bool OfficialRoute(int32_t dcId, bool mediaConnection, bool testBackend, const s
         // DC203 отдаёт медиа аккаунтам без Premium и своего kws-релея не имеет.
         return TunnelRoute(currentNetwork.load(), dcAddress, route);
     }
-    const char *relayIp = officialRelayIpForDc(dcId);
-    if (route == nullptr || testBackend || dcId < 1 || dcId > 5 || relayIp == nullptr) {
+    if (route == nullptr || testBackend || dcId < 1 || dcId > 5) {
         return false;
     }
     Route result;
     result.network = currentNetwork.load();
-    result.relayHost = relayIp;
+    result.relayHost = selectRelayAddress(result.network, dcId);
+    if (result.relayHost.empty()) {
+        return false;
+    }
+    result.relayDcId = dcId;
     result.relayPort = 443;
     result.path = kOfficialPath;
     const std::string prefix = "kws" + std::to_string(dcId);
@@ -930,6 +1044,8 @@ bool RouteUsable(const Route &route) {
     return route.network == currentNetwork.load()
             && (isCdn(route) || !routeSuppressed(route.network, healthName(route)))
             && (!isRelay(route) || !routeSuppressed(route.network, relayAddressHealthName(route.relayHost)))
+            && (!isRelay(route) || route.relayDcId == 0
+                || route.relayHost == selectRelayAddress(route.network, route.relayDcId))
             && (!isCdn(route) || cdnSlotCurrent(route))
             && preferFallback(route) == route.viaFallback;
 }
@@ -1628,7 +1744,10 @@ void Socket::noteAttemptFailed() {
             // Fronts never switch to their DNS name: it resolves to the same
             // two addresses, the pool cannot keep it ready, and the address
             // preference and rotation already move away from a dead one.
-            recordAttemptFailed(routeConfig);
+            // A relay first tries its DC's other ingress, then the name.
+            if (!moveToNextRelayAddress(routeConfig)) {
+                recordAttemptFailed(routeConfig);
+            }
         }
         if (phase == transport::HandshakePhase::None && !routeConfig.viaFallback) {
             noteCdnAddress(routeConfig, false);
@@ -1670,7 +1789,7 @@ void Socket::noteAppDataTimeout() {
     // уходит на прямое соединение.
     failureRecorded = true;
     advanceCdn(routeConfig);
-    if (!isCdn(routeConfig)) {
+    if (!isCdn(routeConfig) && !moveToNextRelayAddress(routeConfig)) {
         recordAttemptFailed(routeConfig);
     }
     recordRouteUnreachable(routeConfig);

@@ -49,16 +49,20 @@ def main() -> None:
             "direct WSS must not inject the MTProxy-only DC marker")
     require("dcId < 1 || dcId > 5" in wss_cpp and "testBackend" in wss_cpp,
             "unsupported/test DCs must stay on their normal transport")
-    require("officialRelayIpForDc" in wss_cpp
-            and 'return "149.154.167.220"' in wss_cpp
+    require("officialRelayIpsForDc" in wss_cpp
+            and '{"149.154.167.220", "149.154.167.99"}' in wss_cpp
+            and "result.relayHost = selectRelayAddress(result.network, dcId)" in wss_cpp
             and "result.relayHostFallback = result.domain" in wss_cpp
             and "result.viaFallback = preferFallback(result)" in wss_cpp,
             "official WSS must use direct Telegram ingress with an automatic hostname fallback")
+    require("if (!moveToNextRelayAddress(routeConfig))" in wss_cpp
+            and "!isCdn(routeConfig) && !moveToNextRelayAddress(routeConfig)" in wss_cpp,
+            "a failed relay address must hand the DC to its other ingress before the DNS name")
     require("if (isCurrentTransportWss())" in connection_cpp
             and "useSecret = 0" in connection_cpp,
             "direct WSS must not inherit a TCP dcOption or MTProxy secret")
     require("supportsCdnFileRedirects()" in connections_java
-            and "return !SharedConfig.wssTransportEnabled" in connections_java,
+            and "return !isWssTransportActive()" in connections_java,
             "network layer must disable CDN redirects when WSS cannot route CDN DC ids")
     require("req.cdn_supported = ConnectionsManager.supportsCdnFileRedirects()" in file_loader,
             "file downloads must advertise the active transport's CDN capability")
