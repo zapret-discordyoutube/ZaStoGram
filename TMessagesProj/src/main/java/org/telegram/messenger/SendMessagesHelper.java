@@ -3886,11 +3886,17 @@ public class SendMessagesHelper extends BaseController implements NotificationCe
                     messageObject.richCheckboxEcho = true;
                 }
                 getMessagesController().processUpdates((TLRPC.Updates) response, false);
-                AndroidUtilities.runOnUIThread(() -> onRichEditFinished(messageObject, false));
+                AndroidUtilities.runOnUIThread(() -> {
+                    onRichEditFinished(messageObject, false);
+                    ZaStoAppendMedia.onRichEditResult(messageObject, null); // ZaSto
+                });
             } else if (FileRefController.isFileRefError(error.text) && requestRichMessageFileReference(messageObject, req, error.text, () -> sendEditRichMessageRequest(req, messageObject, fragment, onlyCheckbox))) {
 
             } else {
-                AndroidUtilities.runOnUIThread(() -> onRichEditFinished(messageObject, true));
+                AndroidUtilities.runOnUIThread(() -> {
+                    onRichEditFinished(messageObject, true);
+                    ZaStoAppendMedia.onRichEditResult(messageObject, error); // ZaSto
+                });
                 if (fragment != null) {
                     AndroidUtilities.runOnUIThread(() -> AlertsCreator.processError(currentAccount, error, fragment, req));
                 }

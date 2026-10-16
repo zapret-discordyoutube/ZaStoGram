@@ -6471,6 +6471,17 @@
     <string name="ZaStoAppendMediaUnsupported">Media cannot be added to this message. Only photos and videos in your own messages are supported.</string>
     <string name="ZaStoAppendMediaNoDelete">You can add media only to your own messages that you can delete for everyone.</string>
     <string name="ZaStoAppendMediaNoSchedule">Scheduling is not available when adding media to a message.</string>
+    <string name="ZaStoAppendInPlace">Add to this message</string>
+    <string name="ZaStoAppendMediaResend">Resend as a new album</string>
+    <string name="ZaStoAppendInPlaceConfirm">The message stays where it is: its date, reactions and replies are kept. It becomes a gallery (a Telegram rich message); older Telegram apps may show it differently.</string>
+    <string name="ZaStoAppendInPlaceOfferResend">You can resend it as a new album instead: the original will be deleted, and its date, reactions and replies won\'t be kept.</string>
+    <string name="ZaStoAppendInPlaceAlbum">An album can\'t be extended in place: in Telegram it is several separate messages.</string>
+    <string name="ZaStoAppendInPlacePremium">Telegram lets only Premium accounts post galleries (rich messages), so this message can\'t be extended in place.</string>
+    <string name="ZaStoAppendInPlaceNotEditable">This message can no longer be edited.</string>
+    <string name="ZaStoAppendInPlaceEditedVideo">An edited video (trimmed, with filters or drawing) or a non-MP4 video can\'t be added in place.</string>
+    <string name="ZaStoAppendInPlaceUploadFailed">Could not upload the files.</string>
+    <string name="ZaStoAppendInPlaceFailed">Telegram did not accept the change (%1$s).</string>
+    <string name="ZaStoAppendInPlaceDone">Media added to the message</string>
     <string name="DynamicPackOrder">Dynamic Pack Order</string>
     <string name="DynamicPackOrderInfo">Automatically place recently used sticker packs at the front of the panel.</string>
     <string name="DynamicPackOrderOff">Dynamic Order Off</string>

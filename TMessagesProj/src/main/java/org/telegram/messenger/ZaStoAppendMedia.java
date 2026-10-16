@@ -38,6 +38,8 @@ public final class ZaStoAppendMedia {
         public final MessageObject replyTo;
         public final MessageObject replyToTop;
         public final int topicId;
+        /** Дополнить исходное сообщение на месте, а не отправлять новый альбом. */
+        public boolean inPlace;
 
         private Session(int account, long dialogId, ArrayList<MessageObject> sources, MessageObject replyTo, MessageObject replyToTop, int topicId) {
             this.account = account;
@@ -311,6 +313,259 @@ public final class ZaStoAppendMedia {
                 stop();
                 MessagesController.getInstance(this.account).deleteMessages(new ArrayList<>(sourceIds), null, null, dialogId, topicId, true, 0);
             }
+        }
+    }
+
+    // ---- Дополнить на месте: исходное сообщение правкой становится богатым с галереей ----
+    //
+    // Альбом нельзя расширить, но богатое сообщение (Telegram 13.x) можно отредактировать: messages.editMessage
+    // с rich_message. Галерея pageBlockCollage рисуется той же раскладкой, что и альбом (RichCollageBlock →
+    // MessageObject.computeGrouped). Сообщение остаётся тем же: дата, реакции, ответы и пересылки сохраняются.
+    // Публиковать богатые сообщения сервер разрешает не всем (app config rich_message_posting, по умолчанию
+    // premium), поэтому при любом отказе ChatActivity предлагает прежний путь — новый альбом.
+
+    /** Новый файл для дополнения на месте: то, что нужно загрузчику богатых сообщений. */
+    public static final class NewItem {
+        final String path;
+        final boolean video;
+        final int width;
+        final int height;
+        final int duration;
+        final boolean spoiler;
+        final boolean edited;
+
+        public NewItem(String path, boolean video, int width, int height, int duration, boolean spoiler, VideoEditedInfo editedInfo) {
+            this.path = path;
+            this.video = video;
+            this.width = width;
+            this.height = height;
+            this.duration = duration;
+            this.spoiler = spoiler;
+            this.edited = video && isEditedVideo(editedInfo);
+        }
+    }
+
+    public interface InPlaceListener {
+        /** Файлы загружены, правка ушла на сервер. */
+        void onEditSent();
+
+        /** Сервер принял правку. */
+        void onDone();
+
+        /** Загрузка или правка не удалась; локальное состояние сообщения уже откатано. */
+        void onFailed(String reason);
+    }
+
+    /**
+     * Причина, по которой сообщение нельзя дополнить на месте, или 0. Проверяется после validateSources.
+     * Альбом — несколько отдельных сообщений, одно из них правкой галереей не станет.
+     */
+    public static int inPlaceBlocker(Session session, TLRPC.Chat chat) {
+        if (session == null || session.sources.size() != 1) {
+            return R.string.ZaStoAppendInPlaceAlbum;
+        }
+        final MessageObject m = session.sources.get(0);
+        if (m.getGroupId() != 0) {
+            return R.string.ZaStoAppendInPlaceAlbum;
+        }
+        if (!MessagesController.getInstance(session.account).richEditorAllowed()) {
+            return R.string.ZaStoAppendInPlacePremium;
+        }
+        if (m.messageOwner.rich_message != null || !m.canEditMessage(chat)) {
+            return R.string.ZaStoAppendInPlaceNotEditable;
+        }
+        return 0;
+    }
+
+    /** Проверка выбранных файлов для дополнения на месте: 0 — можно. */
+    public static int validateInPlace(ArrayList<NewItem> items) {
+        if (items == null || items.isEmpty()) {
+            return R.string.ZaStoAppendMediaUnsupported;
+        }
+        for (int a = 0, N = items.size(); a < N; a++) {
+            final NewItem item = items.get(a);
+            if (item.path == null || item.path.isEmpty()) {
+                return R.string.ZaStoAppendMediaUnsupported;
+            }
+            // Загрузчик богатых сообщений шлёт видео файлом как есть: обрезку, фильтры и рисунок
+            // он не применит, поэтому такое видео идёт только новым альбомом.
+            if (item.video && (item.edited || !item.path.toLowerCase(java.util.Locale.US).endsWith(".mp4"))) {
+                return R.string.ZaStoAppendInPlaceEditedVideo;
+            }
+        }
+        return 0;
+    }
+
+    /** Вызывать из UI-потока после validateInPlace. */
+    public static void appendInPlace(Session session, ArrayList<NewItem> items, CharSequence caption, InPlaceListener listener) {
+        new InPlace(session, items, caption, listener).start();
+    }
+
+    /** Правки на месте, ждущие ответа сервера, по объекту сообщения. Только UI-поток. */
+    private static final java.util.IdentityHashMap<MessageObject, InPlace> PENDING_EDITS = new java.util.IdentityHashMap<>();
+
+    /** Из SendMessagesHelper.sendEditRichMessageRequest: ответ сервера на правку богатого сообщения (UI-поток). */
+    public static void onRichEditResult(MessageObject messageObject, TLRPC.TL_error error) {
+        final InPlace job = PENDING_EDITS.remove(messageObject);
+        if (job != null) {
+            job.onEditResult(error);
+        }
+    }
+
+    private static boolean isEditedVideo(VideoEditedInfo info) {
+        return info != null && (info.roundVideo || info.muted
+                || info.cropState != null || info.paintPath != null || info.blurPath != null
+                || info.filterState != null || info.mediaEntities != null
+                || !info.mixedSoundInfos.isEmpty() || info.videoOffset != 0 || info.startTime > 0
+                || (info.endTime > 0 && info.endTime < info.estimatedDuration * 1000));
+    }
+
+    private static void ensureCaption(org.telegram.tgnet.tl.TL_iv.PageBlock block) {
+        if (block.caption == null) {
+            block.caption = new org.telegram.tgnet.tl.TL_iv.PageCaption();
+        }
+        if (block.caption.text == null) {
+            block.caption.text = new org.telegram.tgnet.tl.TL_iv.textEmpty();
+        }
+        if (block.caption.credit == null) {
+            block.caption.credit = new org.telegram.tgnet.tl.TL_iv.textEmpty();
+        }
+    }
+
+    private static org.telegram.tgnet.tl.TL_iv.PageBlock mediaBlock(boolean video, long id, boolean spoiler) {
+        final org.telegram.tgnet.tl.TL_iv.PageBlock block;
+        if (video) {
+            final org.telegram.tgnet.tl.TL_iv.pageBlockVideo v = new org.telegram.tgnet.tl.TL_iv.pageBlockVideo();
+            v.video_id = id;
+            v.spoiler = spoiler;
+            block = v;
+        } else {
+            final org.telegram.tgnet.tl.TL_iv.pageBlockPhoto p = new org.telegram.tgnet.tl.TL_iv.pageBlockPhoto();
+            p.photo_id = id;
+            p.spoiler = spoiler;
+            block = p;
+        }
+        ensureCaption(block);
+        return block;
+    }
+
+    private static final class InPlace {
+        private final Session session;
+        private final MessageObject target;
+        private final ArrayList<NewItem> items;
+        private final CharSequence caption;
+        private final InPlaceListener listener;
+        private final org.telegram.ui.iv.RichMediaUploader[] uploaders;
+        private final TLRPC.Photo[] photos;
+        private final TLRPC.Document[] videos;
+        private int left;
+        private boolean failed;
+
+        InPlace(Session session, ArrayList<NewItem> items, CharSequence caption, InPlaceListener listener) {
+            this.session = session;
+            this.target = session.sources.get(0);
+            this.items = items;
+            this.caption = caption;
+            this.listener = listener;
+            this.uploaders = new org.telegram.ui.iv.RichMediaUploader[items.size()];
+            this.photos = new TLRPC.Photo[items.size()];
+            this.videos = new TLRPC.Document[items.size()];
+        }
+
+        void start() {
+            left = items.size();
+            for (int a = 0, N = items.size(); a < N; a++) {
+                final int index = a;
+                final NewItem item = items.get(a);
+                uploaders[a] = new org.telegram.ui.iv.RichMediaUploader(session.account, item.path, item.video, item.width, item.height, item.duration, new org.telegram.ui.iv.RichMediaUploader.Listener() {
+                    @Override
+                    public void onPhotoUploaded(TLRPC.Photo photo) {
+                        photos[index] = photo;
+                        uploaded();
+                    }
+
+                    @Override
+                    public void onVideoUploaded(TLRPC.Document document) {
+                        videos[index] = document;
+                        uploaded();
+                    }
+
+                    @Override
+                    public void onError() {
+                        fail(LocaleController.getString(R.string.ZaStoAppendInPlaceUploadFailed));
+                    }
+                });
+                uploaders[a].start();
+            }
+        }
+
+        private void uploaded() {
+            if (failed || --left > 0) {
+                return;
+            }
+            final TLRPC.MessageMedia media = MessageObject.getMedia(target.messageOwner);
+            if (media == null) {
+                fail(LocaleController.getString(R.string.ZaStoAppendMediaUnsupported));
+                return;
+            }
+            final ArrayList<TLRPC.Photo> richPhotos = new ArrayList<>();
+            final ArrayList<TLRPC.Document> richDocuments = new ArrayList<>();
+            final org.telegram.tgnet.tl.TL_iv.pageBlockCollage collage = new org.telegram.tgnet.tl.TL_iv.pageBlockCollage();
+            collage.items = new ArrayList<>();
+            if (media.photo instanceof TLRPC.TL_photo) {
+                collage.items.add(mediaBlock(false, media.photo.id, media.spoiler));
+                richPhotos.add(media.photo);
+            } else {
+                collage.items.add(mediaBlock(true, media.document.id, media.spoiler));
+                richDocuments.add(media.document);
+            }
+            for (int a = 0, N = items.size(); a < N; a++) {
+                if (photos[a] != null) {
+                    collage.items.add(mediaBlock(false, photos[a].id, items.get(a).spoiler));
+                    richPhotos.add(photos[a]);
+                } else if (videos[a] != null) {
+                    collage.items.add(mediaBlock(true, videos[a].id, items.get(a).spoiler));
+                    richDocuments.add(videos[a]);
+                }
+            }
+            ensureCaption(collage);
+            final ArrayList<org.telegram.tgnet.tl.TL_iv.PageBlock> blocks = new ArrayList<>();
+            blocks.add(collage);
+            if (caption != null && caption.toString().trim().length() > 0) {
+                blocks.addAll(org.telegram.ui.iv.RichMessageConvert.blocksFromCharSequence(caption));
+            }
+            PENDING_EDITS.put(target, this);
+            // fragment = null: об отказе сообщает listener (с предложением отправить альбомом), не AlertsCreator.
+            SendMessagesHelper.prepareEditingArticle(AccountInstance.getInstance(session.account), target, blocks,
+                    richPhotos, richDocuments, null, false, null);
+            listener.onEditSent();
+        }
+
+        private void fail(String reason) {
+            if (failed) {
+                return;
+            }
+            failed = true;
+            for (org.telegram.ui.iv.RichMediaUploader uploader : uploaders) {
+                if (uploader != null) {
+                    uploader.cancel();
+                }
+            }
+            listener.onFailed(reason);
+        }
+
+        void onEditResult(TLRPC.TL_error error) {
+            if (error == null) {
+                listener.onDone();
+                return;
+            }
+            // editRichMessage кладёт rich_message в сообщение до ответа сервера и при отказе его не убирает.
+            target.messageOwner.rich_message = null;
+            final ArrayList<MessageObject> changed = new ArrayList<>();
+            changed.add(target);
+            NotificationCenter.getInstance(session.account).postNotificationName(NotificationCenter.replaceMessagesObjects, target.getDialogId(), changed);
+            failed = true;
+            listener.onFailed(error.text);
         }
     }
 }

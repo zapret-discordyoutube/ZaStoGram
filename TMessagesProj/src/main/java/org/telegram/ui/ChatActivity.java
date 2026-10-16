@@ -12817,6 +12817,8 @@ public class ChatActivity extends BaseFragment implements
                         final ArrayList<Object> selectedPhotosOrder = chatAttachAlert.getPhotoLayout().getSelectedPhotosOrder();
                         if (!selectedPhotos.isEmpty()) {
                             final int albumsCount = zastoSession != null ? 1 : (int) Math.ceil(selectedPhotos.size() / 10f);
+                            final ArrayList<org.telegram.messenger.ZaStoAppendMedia.NewItem> zastoItems = new ArrayList<>();
+                            CharSequence zastoCaption = null;
                             for (int i = 0; i < albumsCount; ++i) {
                                 int count = Math.min(10, selectedPhotos.size() - (i * 10));
                                 ArrayList<SendMessagesHelper.SendingMediaInfo> photos = new ArrayList<>();
@@ -12860,6 +12862,14 @@ public class ChatActivity extends BaseFragment implements
                                     info.stars = photoEntry.starsAmount;
                                     info.highQuality = !isStickerMode && photoEntry.isHighQuality();
                                     photos.add(info);
+                                    if (zastoSession != null && zastoSession.inPlace) {
+                                        // ZaSto: для дополнения на месте — до reset(), пока у записи есть размеры и подпись со стилями
+                                        zastoItems.add(new org.telegram.messenger.ZaStoAppendMedia.NewItem(info.path, isVideo, photoEntry.width, photoEntry.height,
+                                                photoEntry.duration, photoEntry.hasSpoiler, photoEntry.editedInfo));
+                                        if (a == 0 && photoEntry.caption != null) {
+                                            zastoCaption = new SpannableStringBuilder(photoEntry.caption);
+                                        }
+                                    }
                                     photoEntry.reset();
                                 }
                                 boolean updateStickersOrder = false;
@@ -12868,12 +12878,13 @@ public class ChatActivity extends BaseFragment implements
                                     updateStickersOrder = photos.get(0).updateStickersOrder;
                                 }
 
-                                if (zastoSession != null) {
+                                if (zastoSession != null && zastoSession.inPlace) {
+                                    // ZaSto: исходное сообщение правкой становится галереей; при отказе — предложение отправить альбомом
+                                    zastoAppendInPlace(zastoSession, zastoItems, zastoCaption, photos, notify, effectId, invertMedia, payStars);
+                                    zastoEndAppendSession();
+                                } else if (zastoSession != null) {
                                     // ZaSto: исходные медиа + новые файлы уходят одним новым альбомом, оригинал потом удаляется
-                                    final int zastoSendError = org.telegram.messenger.ZaStoAppendMedia.send(getAccountInstance(), zastoSession, photos, notify, effectId, invertMedia, payStars, getSendMonoForumPeerId(), getMessageChatSendParams());
-                                    if (zastoSendError != 0) {
-                                        zastoToast(org.telegram.messenger.ZaStoAppendMedia.message(zastoSendError, zastoSession));
-                                    }
+                                    zastoResendAlbum(zastoSession, photos, notify, effectId, invertMedia, payStars);
                                     zastoEndAppendSession();
                                 } else if (editingMessageObject != null && editingMessageObject.needResendWhenEdit()) {
                                     MessageSuggestionParams params = messageSuggestionParams != null ?
@@ -33430,20 +33441,34 @@ public class ChatActivity extends BaseFragment implements
         builder.setTitle(LocaleController.getString(R.string.ZaStoAppendMediaChoiceTitle));
         builder.setItems(new CharSequence[]{
                 LocaleController.getString(editingMessageObject.isVideo() ? R.string.EditMessageReplaceVideo : R.string.EditMessageReplacePhoto),
-                LocaleController.getString(R.string.ZaStoAppendMedia)
-        }, new int[]{R.drawable.msg_replace, R.drawable.msg_addphoto}, (dialog, which) -> {
+                LocaleController.getString(R.string.ZaStoAppendInPlace),
+                LocaleController.getString(R.string.ZaStoAppendMediaResend)
+        }, new int[]{R.drawable.msg_replace, R.drawable.msg_addphoto, R.drawable.msg_photos}, (dialog, which) -> {
             AndroidUtilities.runOnUIThread(() -> {
                 if (which == 0) {
                     onReplace.run();
                 } else {
-                    zastoStartAppendMedia();
+                    zastoStartAppendMedia(which == 1);
                 }
             });
         });
         showDialog(builder.create());
     }
 
-    private void zastoStartAppendMedia() {
+    /** Дополнить на месте нельзя: объясняем почему и предлагаем отправить заново альбомом. */
+    private void zastoOfferResend(CharSequence reason, Runnable resend) {
+        if (getParentActivity() == null) {
+            return;
+        }
+        final AlertDialog.Builder builder = new AlertDialog.Builder(getParentActivity(), themeDelegate);
+        builder.setTitle(LocaleController.getString(R.string.ZaStoAppendInPlace));
+        builder.setMessage(TextUtils.concat(reason, "\n\n", LocaleController.getString(R.string.ZaStoAppendInPlaceOfferResend)));
+        builder.setPositiveButton(LocaleController.getString(R.string.ZaStoAppendMediaResend), (d, w) -> resend.run());
+        builder.setNegativeButton(LocaleController.getString(R.string.Cancel), null);
+        showDialog(builder.create());
+    }
+
+    private void zastoStartAppendMedia(boolean inPlace) {
         final MessageObject editing = editingMessageObject;
         if (editing == null || getParentActivity() == null) {
             return;
@@ -33460,15 +33485,71 @@ public class ChatActivity extends BaseFragment implements
             zastoToast(org.telegram.messenger.ZaStoAppendMedia.message(error, null));
             return;
         }
+        if (inPlace) {
+            final int blocker = org.telegram.messenger.ZaStoAppendMedia.inPlaceBlocker(
+                    org.telegram.messenger.ZaStoAppendMedia.createSession(currentAccount, dialog_id, sources, getThreadMessage(), (int) getTopicId()), currentChat);
+            if (blocker != 0) {
+                zastoOfferResend(LocaleController.getString(blocker), () -> zastoStartAppendMedia(false));
+                return;
+            }
+        }
         final AlertDialog.Builder builder = new AlertDialog.Builder(getParentActivity(), themeDelegate);
-        builder.setTitle(LocaleController.getString(R.string.ZaStoAppendMedia));
-        builder.setMessage(LocaleController.getString(R.string.ZaStoAppendMediaConfirm));
-        builder.setPositiveButton(LocaleController.getString(R.string.Continue), (dialog, which) -> zastoBeginAppendMedia(editing, sources));
+        builder.setTitle(LocaleController.getString(inPlace ? R.string.ZaStoAppendInPlace : R.string.ZaStoAppendMediaResend));
+        builder.setMessage(LocaleController.getString(inPlace ? R.string.ZaStoAppendInPlaceConfirm : R.string.ZaStoAppendMediaConfirm));
+        builder.setPositiveButton(LocaleController.getString(R.string.Continue), (dialog, which) -> zastoBeginAppendMedia(editing, sources, inPlace));
         builder.setNegativeButton(LocaleController.getString(R.string.Cancel), null);
         showDialog(builder.create());
     }
 
-    private void zastoBeginAppendMedia(MessageObject editing, ArrayList<MessageObject> sources) {
+    /** Отправить заново альбомом — запасной путь, когда дополнить на месте не вышло. */
+    private void zastoResendAlbum(org.telegram.messenger.ZaStoAppendMedia.Session session, ArrayList<SendMessagesHelper.SendingMediaInfo> infos,
+                                  boolean notify, long effectId, boolean invertMedia, long payStars) {
+        final int error = org.telegram.messenger.ZaStoAppendMedia.send(getAccountInstance(), session, infos, notify, effectId, invertMedia, payStars, getSendMonoForumPeerId(), getMessageChatSendParams());
+        if (error != 0) {
+            zastoToast(org.telegram.messenger.ZaStoAppendMedia.message(error, session));
+        }
+    }
+
+    private void zastoAppendInPlace(org.telegram.messenger.ZaStoAppendMedia.Session session, ArrayList<org.telegram.messenger.ZaStoAppendMedia.NewItem> items,
+                                    CharSequence caption, ArrayList<SendMessagesHelper.SendingMediaInfo> infos,
+                                    boolean notify, long effectId, boolean invertMedia, long payStars) {
+        final Runnable resend = () -> zastoResendAlbum(session, infos, notify, effectId, invertMedia, payStars);
+        final int error = org.telegram.messenger.ZaStoAppendMedia.validateInPlace(items);
+        if (error != 0) {
+            zastoOfferResend(LocaleController.getString(error), resend);
+            return;
+        }
+        final AlertDialog progress = getParentActivity() != null ? new AlertDialog(getParentActivity(), AlertDialog.ALERT_TYPE_SPINNER) : null;
+        if (progress != null) {
+            progress.setCanCancel(false);
+            showDialog(progress);
+        }
+        org.telegram.messenger.ZaStoAppendMedia.appendInPlace(session, items, caption, new org.telegram.messenger.ZaStoAppendMedia.InPlaceListener() {
+            @Override
+            public void onEditSent() {
+                if (progress != null) {
+                    progress.dismiss();
+                }
+            }
+
+            @Override
+            public void onDone() {
+                if (getParentActivity() != null) {
+                    BulletinFactory.of(ChatActivity.this).createSimpleBulletin(R.raw.contact_check, LocaleController.getString(R.string.ZaStoAppendInPlaceDone)).show();
+                }
+            }
+
+            @Override
+            public void onFailed(String reason) {
+                if (progress != null) {
+                    progress.dismiss();
+                }
+                zastoOfferResend(LocaleController.formatString(R.string.ZaStoAppendInPlaceFailed, reason == null ? "" : reason), resend);
+            }
+        });
+    }
+
+    private void zastoBeginAppendMedia(MessageObject editing, ArrayList<MessageObject> sources, boolean inPlace) {
         if (editingMessageObject != editing || getParentActivity() == null || chatActivityEnterView == null) {
             return;
         }
@@ -33477,6 +33558,7 @@ public class ChatActivity extends BaseFragment implements
             zastoToast(LocaleController.getString(R.string.ZaStoAppendMediaUnsupported));
             return;
         }
+        session.inPlace = inPlace;
         // Подпись берём из поля ввода (там текущий текст редактирования), потом выходим из режима редактирования.
         final CharSequence fieldText = chatActivityEnterView.getFieldText();
         final CharSequence caption = fieldText != null ? new SpannableStringBuilder(fieldText) : null;

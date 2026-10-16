@@ -465,6 +465,17 @@
     <string name="ZaStoAppendMediaUnsupported">К этому сообщению нельзя добавить медиа. Поддерживаются только фото и видео в ваших сообщениях.</string>
     <string name="ZaStoAppendMediaNoDelete">Добавлять медиа можно только к своим сообщениям, которые можно удалить у всех.</string>
     <string name="ZaStoAppendMediaNoSchedule">При добавлении медиа к сообщению отложенная отправка недоступна.</string>
+    <string name="ZaStoAppendInPlace">Дополнить это сообщение</string>
+    <string name="ZaStoAppendMediaResend">Отправить заново альбомом</string>
+    <string name="ZaStoAppendInPlaceConfirm">Сообщение останется на месте: дата, реакции и ответы на него сохранятся. Оно станет галереей (богатым сообщением Telegram); в старых версиях Telegram у собеседников оно может выглядеть иначе.</string>
+    <string name="ZaStoAppendInPlaceOfferResend">Можно отправить заново альбомом: исходное сообщение удалится, дата, реакции и ответы на него не сохранятся.</string>
+    <string name="ZaStoAppendInPlaceAlbum">Альбом нельзя дополнить на месте: в Telegram это несколько отдельных сообщений.</string>
+    <string name="ZaStoAppendInPlacePremium">Галереи (богатые сообщения) Telegram разрешает публиковать только с Premium, поэтому дополнить это сообщение на месте нельзя.</string>
+    <string name="ZaStoAppendInPlaceNotEditable">Это сообщение уже нельзя редактировать.</string>
+    <string name="ZaStoAppendInPlaceEditedVideo">Отредактированное видео (обрезка, фильтры, рисунок) или видео не в MP4 нельзя добавить на месте.</string>
+    <string name="ZaStoAppendInPlaceUploadFailed">Не удалось загрузить файлы.</string>
+    <string name="ZaStoAppendInPlaceFailed">Telegram не принял правку (%1$s).</string>
+    <string name="ZaStoAppendInPlaceDone">Медиа добавлены в сообщение</string>
     <!-- exteraGram ABI: read by DEX plugins (re:extera) via R.string -->
     <string name="RestartRequired">Перезапустите приложение, чтобы применить изменения</string>
     <string name="MainMenuHiddenItems">Скрытые пункты</string>
