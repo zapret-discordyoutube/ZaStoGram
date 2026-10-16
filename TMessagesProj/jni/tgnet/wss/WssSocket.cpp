@@ -52,9 +52,10 @@ constexpr const char *kTunnelHosts[] = {
 constexpr size_t kTunnelHostCount = sizeof(kTunnelHosts) / sizeof(kTunnelHosts[0]);
 // DC203 serves non-Premium media and has no kws relay. The Cloudflare fronts
 // carry it as kws203.<front> (16.10.2026: resPQ from every front tried), so
-// it goes fronts -> tunnel -> fronts like a DC with a closed relay. As a
-// tunnel-only DC it lost every file once the workers ran out of their daily
-// quota and the route fell back to direct TCP (desktop log 16.10, 19:20).
+// it goes fronts -> tunnel -> direct -> fronts like a DC with a closed relay.
+// As a tunnel-only DC it lost every file once the workers ran out of their
+// daily quota and the route fell back to unguarded direct TCP (desktop log
+// 16.10, 19:20).
 constexpr int32_t kNoRelayDcId = 203;
 // Size of the MTProto obfuscation header. Measured against the official relays:
 // a first binary frame of 63 bytes never gets a reply, 64 always does.
@@ -267,6 +268,11 @@ std::string relayAddressHealthName(const std::string &address) {
     return "addr-" + address;
 }
 
+// One health record per DC and network for direct TCP; media shares it.
+std::string directHealthName(int32_t dcId) {
+    return "direct-dc" + std::to_string(dcId < 0 ? -dcId : dcId);
+}
+
 // Telegram Web ingress addresses, not a proxy: the kwsN hostname stays the TLS
 // identity and the last fallback. Each ingress serves only its own DCs. DC2
 // and DC4 have two: DNS names 149.154.167.99 (web.telegram.org too), while
@@ -321,7 +327,7 @@ void suppressLocked(const Route &route, RouteHealth &health, int64_t now, const 
     if (LOGS_ENABLED) {
         DEBUG_D("wss_route suppressed domain=%s net=%s for_ms=%lld reason=%s next=%s", healthName(route).c_str(),
                 networkName(route.network), (long long) ttl, reason,
-                route.tunnel ? "direct" : (isCdn(route) ? "tunnel" : "cdn"));
+                route.direct ? "cdn" : (route.tunnel ? "direct" : (isCdn(route) ? "tunnel" : "cdn")));
     }
 }
 
@@ -899,6 +905,35 @@ void setDiagnostic(std::string *diagnostic, const char *value) {
 
 } // namespace
 
+void NoteDirectStepClosed(const Route &route, uint64_t receivedBytes, const char *failure) {
+    if (!route.direct) {
+        return;
+    }
+    std::lock_guard<std::mutex> lock(relayPreferencesMutex);
+    RouteHealth &health = routeHealth[networkKey(route.network, healthName(route))];
+    const int64_t now = monotonicMillis();
+    if (receivedBytes >= kDirectProofBytes) {
+        if (LOGS_ENABLED && health.suppressions != 0) {
+            DEBUG_D("wss_route restored domain=%s net=%s reason=proven", healthName(route).c_str(), networkName(route.network));
+        }
+        const bool persisted = health.suppressions != 0;
+        health = RouteHealth();
+        if (persisted) {
+            saveRouteHealthLocked();
+        }
+        return;
+    }
+    if (failure == nullptr || health.suppressedUntil > now) {
+        return;
+    }
+    health.lastFailureAt = now;
+    if (LOGS_ENABLED) {
+        DEBUG_D("wss_route failure domain=%s net=%s failures=1/1 received=%llu reason=%s", healthName(route).c_str(),
+                networkName(route.network), (unsigned long long) receivedBytes, failure);
+    }
+    suppressLocked(route, health, now, failure);
+}
+
 void SetRouteHealthPath(const std::string &path) {
     loadRouteHealthFrom(path);
 }
@@ -944,6 +979,25 @@ static bool TunnelRoute(int32_t network, const std::string &dcAddress, Route *ro
     return false;
 }
 
+// Direct TCP as the last guarded step. Networks that block the relays close
+// direct TCP too, and an unguarded fallback there kept DC2 "connecting" for
+// minutes (logs (1) (8)): one failure pauses it like a suppressed route, so a
+// blocked network pays a few seconds once per pause, while one where only
+// Cloudflare is closed still reaches the DC.
+static bool DirectRoute(int32_t network, int32_t dcId, Route *route) {
+    const std::string name = directHealthName(dcId);
+    if (routeSuppressed(network, name)) {
+        return false;
+    }
+    Route result;
+    result.direct = true;
+    result.network = network;
+    result.domain = name;
+    result.healthDomain = name;
+    *route = std::move(result);
+    return true;
+}
+
 static bool CdnRoute(int32_t network, int32_t dcId, Route *route, bool ignoreSuppression = false) {
     Route result;
     result.network = network;
@@ -987,7 +1041,7 @@ bool OfficialRoute(int32_t dcId, bool mediaConnection, bool testBackend, const s
         // DC203 отдаёт медиа аккаунтам без Premium и своего kws-релея не имеет.
         const int32_t network = currentNetwork.load();
         return CdnRoute(network, dcId, route) || TunnelRoute(network, dcAddress, route)
-                || CdnRoute(network, dcId, route, true);
+                || DirectRoute(network, dcId, route) || CdnRoute(network, dcId, route, true);
     }
     if (route == nullptr || testBackend || dcId < 1 || dcId > 5) {
         return false;
@@ -1009,15 +1063,16 @@ bool OfficialRoute(int32_t dcId, bool mediaConnection, bool testBackend, const s
     if (routeSuppressed(result.network, result.domain)
             || routeSuppressed(result.network, relayAddressHealthName(result.relayHost))) {
         // Релей этого датацентра недоступен: сначала фронты Cloudflare, затем
-        // туннель через Worker, а если недоступен и он, соединение идёт
-        // напрямую. Для медиа пробовали и прямой путь первым (logs (13)):
-        // 27 попыток к медиа DC1, ни одного TCP-подключения, тогда как
-        // задушенный туннель мелкими частями хоть что-то отдаёт.
-        if (CdnRoute(result.network, dcId, route) || TunnelRoute(result.network, dcAddress, route)) {
+        // туннель через Worker, затем прямой TCP, если он не на паузе. Для
+        // медиа пробовали и прямой путь первым (logs (13)): 27 попыток к медиа
+        // DC1, ни одного TCP-подключения, тогда как задушенный туннель мелкими
+        // частями хоть что-то отдаёт.
+        if (CdnRoute(result.network, dcId, route) || TunnelRoute(result.network, dcAddress, route)
+                || DirectRoute(result.network, dcId, route)) {
             return true;
         }
-        // Everything is suppressed. The direct path this used to fall back to
-        // is exactly what these networks block: a tester's DC2 sat in
+        // Everything is suppressed, direct TCP included. Unguarded, direct was
+        // exactly what these networks block: a tester's DC2 sat in
         // "connecting" for minutes (logs (1) (8)) while the fronts of DC4
         // answered in 100 ms. Twenty fronts on forty addresses are the floor.
         static std::atomic<int64_t> lastAllSuppressedLog{0};

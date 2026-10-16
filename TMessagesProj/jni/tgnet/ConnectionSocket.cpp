@@ -3517,7 +3517,19 @@ void ConnectionSocket::openConnection(std::string address, uint16_t port, std::s
             address,
             &selectedWssRoute);
 
-    if (!shouldUseWss && manager.wssEnabled && overrideProxyAddress.empty() && proxyAddress->empty() && LOGS_ENABLED) {
+    finishDirectStep(0);
+    if (shouldUseWss && selectedWssRoute.direct) {
+        // Every WSS step is paused and direct TCP is not: one guarded try at
+        // the DC's own address (tgnet::wss::DirectRoute).
+        shouldUseWss = false;
+        stateMachine.directStep = ConnectionSocketStateMachine::DirectStepSubstate();
+        stateMachine.directStep.active = true;
+        stateMachine.directStep.route = selectedWssRoute;
+        stateMachine.directStep.openTime = manager.getCurrentTimeMonotonicMillis();
+        if (LOGS_ENABLED) {
+            DEBUG_D("connection(%p) wss_route use=direct dc%d media=%d target=%s:%u", this, (int) datacenterId, mediaConnection ? 1 : 0, address.c_str(), (unsigned int) port);
+        }
+    } else if (!shouldUseWss && manager.wssEnabled && overrideProxyAddress.empty() && proxyAddress->empty() && LOGS_ENABLED) {
         DEBUG_D("connection(%p) wss_startup direct dc%d media=%d target=%s:%u reason=no_usable_wss_route", this, (int) datacenterId, mediaConnection ? 1 : 0, address.c_str(), (unsigned int) port);
     }
     if (shouldUseWss && manager.getIpStratagy() == USE_IPV6_ONLY
@@ -4052,6 +4064,54 @@ bool ConnectionSocket::isCurrentMtProxyConnection() {
            && strcmp(currentSecretKind, "none") != 0
            && strcmp(currentSecretKind, "socks") != 0
            && strcmp(currentSecretKind, "wss") != 0;
+}
+
+// Direct TCP as the last WSS step gets the WSS watchdogs instead of the
+// generic 8-12 s connect timeout: a blocked network drops the SYN or lets TCP
+// up and never answers, and the step must give the DC back to the fronts fast.
+bool ConnectionSocket::checkDirectStepTimeout(int64_t now) {
+    ConnectionSocketStateMachine::DirectStepSubstate &step = stateMachine.directStep;
+    if (!step.active || step.failure != nullptr) {
+        return false;
+    }
+    if (!onConnectedSent && now - step.openTime > WSS_TCP_CONNECT_TIMEOUT_MS) {
+        step.failure = "direct_tcp_timeout";
+    } else if (transportAppDataUnanswered(now, step.firstSendTime > 0, step.receivedBytes == 0, step.firstSendTime,
+            currentMediaConnection ? WSS_MEDIA_APPDATA_NO_RESPONSE_TIMEOUT_MS : TRANSPORT_APPDATA_NO_RESPONSE_TIMEOUT_MS)) {
+        step.failure = "direct_no_answer";
+    } else {
+        return false;
+    }
+    if (LOGS_ENABLED) DEBUG_D("connection(%p) wss_route direct_step %s elapsed=%lld", this, step.failure, (long long) (now - step.openTime));
+    closeSocket(2, 0);
+    return true;
+}
+
+void ConnectionSocket::noteDirectStepSent(uint32_t bytes) {
+    ConnectionSocketStateMachine::DirectStepSubstate &step = stateMachine.directStep;
+    if (step.active && bytes > 0 && step.firstSendTime == 0) {
+        step.firstSendTime = ConnectionsManager::getInstance(instanceNum).getCurrentTimeMonotonicMillis();
+    }
+}
+
+// One verdict per direct step. An intentional close (reason 0: suspend, drop)
+// of a socket that answered is no evidence either way; an error or timeout
+// before kDirectProofBytes is the throttling the step guards against.
+void ConnectionSocket::finishDirectStep(int32_t reason) {
+    ConnectionSocketStateMachine::DirectStepSubstate &step = stateMachine.directStep;
+    if (!step.active) {
+        return;
+    }
+    const char *failure = step.failure;
+    if (failure == nullptr && step.receivedBytes < tgnet::wss::kDirectProofBytes) {
+        if (step.firstSendTime > 0 && step.receivedBytes == 0) {
+            failure = "direct_closed_before_answer";
+        } else if (reason != 0) {
+            failure = step.receivedBytes > 0 ? "direct_closed_short" : "direct_tcp_failed";
+        }
+    }
+    tgnet::wss::NoteDirectStepClosed(step.route, step.receivedBytes, failure);
+    step = ConnectionSocketStateMachine::DirectStepSubstate();
 }
 
 bool ConnectionSocket::isCurrentDirectConnection() const {
@@ -4713,6 +4773,7 @@ void ConnectionSocket::closeStepOsTeardown() {
 // onDisconnected must stay the LAST statement: it reads the resolved
 // diagnostic and consumeSuggestedReconnectHoldMs() from this object.
 void ConnectionSocket::closeStepResetStateAndNotify(int32_t reason, int32_t error) {
+    finishDirectStep(reason);
     // Each front failure already moves to another front, so the 1 s pause
     // before reconnecting only adds to the ~1.1 s the next dial takes.
     wssFrontFastFailure = currentTransportWss && currentWssRoute.cdnSlot >= 0 && !onConnectedSent
@@ -5081,6 +5142,7 @@ void ConnectionSocket::onEvent(uint32_t events) {
                             }
                         } else {
                             markMtProxyFirstPlainDataReceived((uint32_t) readCount);
+                            stateMachine.directStep.receivedBytes += (uint64_t) readCount;
                             if (!canDeliverReceivedData("first_mtproxy_packet_recv")) {
                                 closeSocket(1, -1);
                                 return;
@@ -5288,6 +5350,7 @@ void ConnectionSocket::onEvent(uint32_t events) {
                                 ConnectionsManager::getInstance(instanceNum).delegate->onBytesSent((int32_t) sentLength, currentNetworkType, instanceNum);
                             }
                             markMtProxyFirstPlainDataSent((uint32_t) sentLength);
+                            noteDirectStepSent((uint32_t) sentLength);
                             outgoingByteStream->discard((uint32_t) sentLength);
                             adjustWriteOp();
                         }
@@ -5410,6 +5473,9 @@ int32_t ConnectionSocket::getDatacenterId() const {
 
 bool ConnectionSocket::checkTimeout(int64_t now) {
     if (isCurrentDirectConnection()) {
+        if (checkDirectStepTimeout(now)) {
+            return true;
+        }
         if (timeout != 0 && (now - lastEventTime) > (int64_t) timeout * 1000) {
             if (!onConnectedSent || hasPendingRequests()) {
                 closeSocket(2, 0);

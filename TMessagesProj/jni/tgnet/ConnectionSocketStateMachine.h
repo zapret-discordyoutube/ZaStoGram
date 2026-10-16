@@ -162,6 +162,19 @@ public:
         int64_t openTime = 0;
     };
 
+    // Direct TCP handed out by tgnet::wss::OfficialRoute as the guarded last
+    // step of the WSS ladder (Route::direct). The socket itself is an ordinary
+    // direct one; this only watches it and reports one verdict when it closes.
+    struct DirectStepSubstate {
+        bool active = false;
+        tgnet::wss::Route route;
+        int64_t openTime = 0;
+        int64_t firstSendTime = 0;
+        uint64_t receivedBytes = 0;
+        // Why the step failed, set by its watchdog before closing the socket.
+        const char *failure = nullptr;
+    };
+
     struct AdmissionSubstate {
         Timer *timer = nullptr;
         bool queued = false;
@@ -249,6 +262,7 @@ public:
     SocksSubstate socks;
     FakeTlsSubstate fakeTls;
     WssSubstate wss;
+    DirectStepSubstate directStep;
     AdmissionSubstate admission;
     EndpointGateSubstate endpointGate;
     PendingWriteSubstate pendingWrite;

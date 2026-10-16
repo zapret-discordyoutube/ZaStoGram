@@ -44,6 +44,10 @@ struct Route {
     // DC of an official relay route, which picks relayHost from the DC's list
     // of ingress addresses; 0 for fronts and the tunnel.
     int32_t relayDcId = 0;
+    // Plain TCP to the DC's own address: the guarded step after the tunnel and
+    // before the fronts that ignore suppression. Not a WSS socket: the caller
+    // dials dcAddress itself and reports the verdict (NoteDirectStepClosed).
+    bool direct = false;
 };
 
 // Wi-Fi and mobile data reach Telegram through different providers, so relay
@@ -54,8 +58,20 @@ void SetNetworkType(int32_t networkType);
 // use the corresponding -1 relay, matching Telegram Web's transport catalog.
 // While a DC's relay is suppressed as unreachable, the route switches to the
 // Cloudflare front domains of tg-ws-proxy, then to the ZaStoGram Cloudflare
-// Worker, which opens dcAddress (IPv4) over TCP itself.
+// Worker, which opens dcAddress (IPv4) over TCP itself, then to direct TCP
+// (Route::direct) unless that is paused, and finally to the fronts again
+// whatever their suppression.
 bool OfficialRoute(int32_t dcId, bool mediaConnection, bool testBackend, const std::string &dcAddress, Route *route);
+
+// Received bytes that prove a direct step: as with the fronts, networks that
+// throttle Telegram let the first answers through and freeze the rest.
+constexpr uint64_t kDirectProofBytes = 32 * 1024;
+
+// Verdict on a direct step (Route::direct) once its socket closes. A failure
+// (no TCP, no answer, or a session that ended short of kDirectProofBytes)
+// pauses direct TCP for this DC and network at once; proof clears the pause
+// history. Anything else (an idle close by the app) leaves it as it was.
+void NoteDirectStepClosed(const Route &route, uint64_t receivedBytes, const char *failure);
 
 // Whether OfficialRoute would still hand out this exact route: same network,
 // not suppressed and not switched to the relay's DNS name.

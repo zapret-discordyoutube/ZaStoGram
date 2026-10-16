@@ -43,6 +43,9 @@ public:
     bool isDisconnected();
     bool isCurrentMtProxyConnection();
     bool isCurrentDirectConnection() const;
+    bool checkDirectStepTimeout(int64_t now);
+    void noteDirectStepSent(uint32_t bytes);
+    void finishDirectStep(int32_t reason);
     bool hasMtProxyOverride() const;
     // True while this socket dials the WEB proxy's loopback bridge
     // (MtProxyOptions::webBridge). MTProxy pacing never applies to it.
