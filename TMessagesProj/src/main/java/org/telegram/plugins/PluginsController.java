@@ -1061,10 +1061,10 @@ public class PluginsController {
             if (appContext instanceof android.app.Application) {
                 ((android.app.Application) appContext).registerActivityLifecycleCallbacks(
                         new android.app.Application.ActivityLifecycleCallbacks() {
-                            @Override public void onActivityResumed(android.app.Activity a) { dispatchAppEvent("resume"); }
-                            @Override public void onActivityPaused(android.app.Activity a) { dispatchAppEvent("pause"); }
-                            @Override public void onActivityStarted(android.app.Activity a) { dispatchAppEvent("start"); }
-                            @Override public void onActivityStopped(android.app.Activity a) { dispatchAppEvent("stop"); }
+                            @Override public void onActivityResumed(android.app.Activity a) { dispatchAppEvent("app_resume"); }
+                            @Override public void onActivityPaused(android.app.Activity a) { dispatchAppEvent("app_pause"); }
+                            @Override public void onActivityStarted(android.app.Activity a) { dispatchAppEvent("app_start"); }
+                            @Override public void onActivityStopped(android.app.Activity a) { dispatchAppEvent("app_stop"); }
                             @Override public void onActivityCreated(android.app.Activity a, android.os.Bundle b) { }
                             @Override public void onActivitySaveInstanceState(android.app.Activity a, android.os.Bundle b) { }
                             @Override public void onActivityDestroyed(android.app.Activity a) { }

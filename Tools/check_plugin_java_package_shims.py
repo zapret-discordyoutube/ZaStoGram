@@ -42,7 +42,7 @@ REQUIRED_JAVA_FILES = {
         "loadPluginSettings(String id)", "setPluginEnabled(String id, boolean enabled, Object ignored)",
     ],
     "com/exteragram/messenger/plugins/PluginsConstants.java": [
-        "PYTHON = \"python\"", "APP_START = \"start\"", "ON_APP_EVENT",
+        "PYTHON = \"python\"", "APP_START = \"app_start\"", "ON_APP_EVENT", "class MenuItemTypes",
     ],
     "org/telegram/plugins/PluginsController.java": [
         "installedFileForId(String id)", "id + \".plugin\"", "id + \".py\"",

@@ -50,6 +50,49 @@ public class PluginsController {
         return org.telegram.plugins.PluginsController.getInstance();
     }
 
+    public File getPluginsDir() {
+        return pluginsDir;
+    }
+
+    public boolean isInitialized() {
+        return true;
+    }
+
+    public android.content.SharedPreferences getPreferences() {
+        return org.telegram.messenger.ApplicationLoader.applicationContext
+                .getSharedPreferences("zasto_plugins", android.content.Context.MODE_PRIVATE);
+    }
+
+    public boolean hasPluginSettings(String id) {
+        return !new org.telegram.plugins.PluginContext(id).getAllSettings().isEmpty() || host().getPluginInstance(id) != null;
+    }
+
+    public java.util.Map<String, ?> getPluginSettingsPreferences(String id) {
+        return new org.telegram.plugins.PluginContext(id).getAllSettings();
+    }
+
+    public String getPluginSettingString(String id, String key, String def) {
+        Object value = new org.telegram.plugins.PluginContext(id).getSetting(key, def);
+        return value != null ? String.valueOf(value) : null;
+    }
+
+    public boolean getPluginSettingBoolean(String id, String key, boolean def) {
+        Object value = new org.telegram.plugins.PluginContext(id).getSetting(key, def);
+        return value instanceof Boolean ? (Boolean) value : value != null ? Boolean.parseBoolean(String.valueOf(value)) : def;
+    }
+
+    public int getPluginSettingInt(String id, String key, int def) {
+        Object value = new org.telegram.plugins.PluginContext(id).getSetting(key, def);
+        if (value instanceof Number) {
+            return ((Number) value).intValue();
+        }
+        try {
+            return value != null ? Integer.parseInt(String.valueOf(value)) : def;
+        } catch (NumberFormatException e) {
+            return def;
+        }
+    }
+
     public String getPluginPath(String id) {
         PluginInfo info = host().findById(id);
         return info != null ? info.filePath : null;

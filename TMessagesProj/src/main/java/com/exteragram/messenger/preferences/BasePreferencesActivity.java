@@ -38,7 +38,28 @@ import java.util.function.Consumer;
 public abstract class BasePreferencesActivity extends BaseFragment {
 
     protected LinearLayoutManager layoutManager;
-    protected UniversalRecyclerView listView;
+    public UniversalRecyclerView listView;
+
+    /** Top padding of the list; exteraGram subclasses override it to reserve room for headers. */
+    public int getListTopPadding(int topPadding) {
+        return topPadding;
+    }
+
+    public LinearLayoutManager getLayoutManager() {
+        return layoutManager;
+    }
+
+    public void setLayoutManager(LinearLayoutManager layoutManager) {
+        this.layoutManager = layoutManager;
+    }
+
+    public UniversalRecyclerView getListView() {
+        return listView;
+    }
+
+    public boolean hasHeaderFade() {
+        return false;
+    }
 
     @Override
     public View createView(Context context) {
@@ -68,6 +89,7 @@ public abstract class BasePreferencesActivity extends BaseFragment {
         }
         listView.adapter.setApplyBackground(false);
         listView.setClipToPadding(false);
+        listView.setPadding(0, getListTopPadding(0), 0, 0);
         listView.setLayoutManager(layoutManager = new LinearLayoutManager(context, LinearLayoutManager.VERTICAL, false));
         frameLayout.addView(listView, LayoutHelper.createFrame(LayoutHelper.MATCH_PARENT, LayoutHelper.MATCH_PARENT));
 
@@ -116,7 +138,7 @@ public abstract class BasePreferencesActivity extends BaseFragment {
     @Override
     public void onInsets(int left, int top, int right, int bottom) {
         if (listView != null) {
-            listView.setPadding(0, 0, 0, bottom);
+            listView.setPadding(0, getListTopPadding(0), 0, bottom);
             listView.setClipToPadding(false);
         }
     }

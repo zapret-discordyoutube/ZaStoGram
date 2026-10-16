@@ -80,6 +80,58 @@ public class Plugin {
         }
     }
 
+    public String getIcon() {
+        return info != null ? info.icon : icon;
+    }
+
+    public String getAppVersion() {
+        return info != null ? info.appVersionSpec : null;
+    }
+
+    public String getSdkVersion() {
+        return info != null ? info.sdkVersionSpec : null;
+    }
+
+    public java.util.List<String> getRequirements() {
+        return new java.util.ArrayList<>();
+    }
+
+    public boolean hasError() {
+        return info != null && info.error != null;
+    }
+
+    /** The last load/runtime error as a Throwable (exteraGram API), or null. */
+    public Throwable getError() {
+        return hasError() ? new RuntimeException(info.error) : null;
+    }
+
+    public void setError(Throwable error) {
+        if (info != null) {
+            info.error = error == null ? null : String.valueOf(error.getMessage());
+        }
+    }
+
+    public boolean isNotResponding() {
+        return false;
+    }
+
+    public void setEnabled(boolean enabled) {
+        String pluginId = getId();
+        if (pluginId != null) {
+            org.telegram.plugins.PluginsController.getInstance().setEnabled(pluginId, enabled);
+        }
+    }
+
+    @Override
+    public boolean equals(Object o) {
+        return o instanceof Plugin && java.util.Objects.equals(((Plugin) o).getId(), getId());
+    }
+
+    @Override
+    public int hashCode() {
+        return java.util.Objects.hashCode(getId());
+    }
+
     public PluginInfo getInfo() {
         return info;
     }

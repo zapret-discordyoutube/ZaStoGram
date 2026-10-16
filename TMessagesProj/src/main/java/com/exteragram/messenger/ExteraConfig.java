@@ -35,4 +35,35 @@ public final class ExteraConfig {
 
     public static void saveMainMenuLayout() {
     }
+
+    public static android.content.SharedPreferences getPreferences() {
+        return org.telegram.messenger.ApplicationLoader.applicationContext
+                .getSharedPreferences("exteraconfig", android.content.Context.MODE_PRIVATE);
+    }
+
+    public static android.content.SharedPreferences.Editor getEditor() {
+        return getPreferences().edit();
+    }
+
+    public static boolean getPluginsEngine() {
+        return true;
+    }
+
+    public static boolean getPluginsSafeMode() {
+        return false;
+    }
+
+    /** Avatar corner radius in px for an avatar {@code size} dp wide: ZaStoGram avatars are round. */
+    public static int getAvatarCorners(float size) {
+        return getAvatarCorners(size, false, false);
+    }
+
+    public static int getAvatarCorners(float size, boolean inPixels) {
+        return getAvatarCorners(size, inPixels, false);
+    }
+
+    public static int getAvatarCorners(float size, boolean inPixels, boolean forum) {
+        float px = inPixels ? size : org.telegram.messenger.AndroidUtilities.dp(size);
+        return (int) (forum ? px * 0.3f : px / 2f);
+    }
 }

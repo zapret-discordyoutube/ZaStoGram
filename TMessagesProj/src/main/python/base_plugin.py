@@ -109,10 +109,10 @@ class HookResult:
 
 class AppEvent:
     """Lifecycle events delivered to BasePlugin.on_app_event."""
-    START = "start"
-    STOP = "stop"
-    PAUSE = "pause"
-    RESUME = "resume"
+    START = "app_start"     # PluginsConstants.APP_START
+    STOP = "app_stop"
+    PAUSE = "app_pause"
+    RESUME = "app_resume"
 
 
 class MethodHook:

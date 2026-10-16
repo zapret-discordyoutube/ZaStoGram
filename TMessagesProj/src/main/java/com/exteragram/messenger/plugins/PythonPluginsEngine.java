@@ -45,6 +45,14 @@ public class PythonPluginsEngine {
         }
     };
 
+    public Map<String, Object> getPluginInstances() {
+        return pluginInstances;
+    }
+
+    public boolean isEngineAvailable() {
+        return true;
+    }
+
     public void loadPlugins(Object ignored) {
         host().reloadPluginsFromDisk();
     }

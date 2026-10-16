@@ -146,6 +146,26 @@ public abstract class LocaleUtils {
         }
     }
 
+    /** Turn MARKER...MARKER runs into a StyleSpan of {@code style} (e.g. "**" -> bold). */
+    public static void applyMarkup(SpannableStringBuilder builder, String marker, int style) {
+        int from = 0;
+        while (true) {
+            String current = builder.toString();
+            int start = current.indexOf(marker, from);
+            if (start == -1) {
+                return;
+            }
+            int end = current.indexOf(marker, start + marker.length());
+            if (end == -1) {
+                return;
+            }
+            builder.delete(end, end + marker.length());
+            builder.delete(start, start + marker.length());
+            builder.setSpan(new android.text.style.StyleSpan(style), start, end - marker.length(), Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+            from = end - marker.length();
+        }
+    }
+
     public static CharSequence fromHtml(String html) {
         return new SpannableString(Html.fromHtml(html, Html.FROM_HTML_MODE_LEGACY));
     }
