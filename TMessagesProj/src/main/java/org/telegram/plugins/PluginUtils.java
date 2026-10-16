@@ -8,6 +8,7 @@ import org.telegram.messenger.ApplicationLoader;
 import org.telegram.messenger.DispatchQueue;
 import org.telegram.messenger.FileLog;
 import org.telegram.messenger.MessageObject;
+import org.telegram.messenger.MessagesController;
 import org.telegram.messenger.SendMessagesHelper;
 import org.telegram.messenger.UserConfig;
 import org.telegram.messenger.Utilities;
@@ -146,34 +147,97 @@ public final class PluginUtils {
      */
     public static void sendDocument(long dialogId, String path, String caption, Object captionEntities,
                                     Object replyToMsg, Object replyToTopMsg, Object replyQuote) {
+        sendMedia(UserConfig.selectedAccount, dialogId, path, caption, captionEntities,
+                replyToMsg, replyToTopMsg, replyQuote, "document", false, false);
+    }
+
+    /**
+     * Send a local file from {@code account}. {@code kind} is "photo", "video", "audio" or
+     * "document": photos and videos go through prepareSendingMedia (real photo/video messages with
+     * size, duration and thumbnail filled in), audio and documents through prepareSendingDocuments,
+     * which reads audio metadata itself.
+     */
+    public static void sendMedia(int account, long dialogId, String path, String caption, Object captionEntities,
+                                 Object replyToMsg, Object replyToTopMsg, Object replyQuote,
+                                 String kind, boolean highQuality, boolean hasMediaSpoilers) {
         if (path == null || dialogId == 0) {
             return;
         }
+        final int acc = account >= 0 && account < UserConfig.MAX_ACCOUNT_COUNT ? account : UserConfig.selectedAccount;
         final String cap = caption == null ? "" : caption;
         final ArrayList<TLRPC.MessageEntity> entities = coerceMessageEntities(captionEntities);
+        final MessageObject reply = replyToMsg instanceof MessageObject ? (MessageObject) replyToMsg : null;
+        final MessageObject replyTop = replyToTopMsg instanceof MessageObject ? (MessageObject) replyToTopMsg : null;
+        final ChatActivity.ReplyQuote quote = replyQuote instanceof ChatActivity.ReplyQuote ? (ChatActivity.ReplyQuote) replyQuote : null;
         AndroidUtilities.runOnUIThread(() -> {
             try {
-                int account = UserConfig.selectedAccount;
-                ArrayList<String> paths = new ArrayList<>();
-                ArrayList<String> originalPaths = new ArrayList<>();
-                paths.add(path);
-                originalPaths.add(path);
-                SendMessagesHelper.prepareSendingDocuments(
-                        AccountInstance.getInstance(account),
-                        paths, originalPaths, null, cap, entities, null, dialogId,
-                        (MessageObject) replyToMsg,
-                        (MessageObject) replyToTopMsg,
-                        null,
-                        (ChatActivity.ReplyQuote) replyQuote,
-                        null, true, 0, 0, null, null, 0L, false, 0L, 0L, null);
+                AccountInstance instance = AccountInstance.getInstance(acc);
+                if ("photo".equals(kind) || "video".equals(kind)) {
+                    SendMessagesHelper.SendingMediaInfo info = new SendMessagesHelper.SendingMediaInfo();
+                    info.path = path;
+                    info.caption = cap;
+                    info.entities = entities;
+                    info.isVideo = "video".equals(kind);
+                    info.highQuality = highQuality;
+                    info.hasMediaSpoilers = hasMediaSpoilers;
+                    ArrayList<SendMessagesHelper.SendingMediaInfo> media = new ArrayList<>();
+                    media.add(info);
+                    SendMessagesHelper.prepareSendingMedia(instance, media, dialogId, reply, replyTop,
+                            null, quote, false, false, null, true, 0, 0, 0, false, null, null,
+                            0L, false, 0L, 0L, null);
+                } else {
+                    ArrayList<String> paths = new ArrayList<>();
+                    ArrayList<String> originalPaths = new ArrayList<>();
+                    paths.add(path);
+                    originalPaths.add(path);
+                    SendMessagesHelper.prepareSendingDocuments(
+                            instance, paths, originalPaths, null, cap, entities, null, dialogId,
+                            reply, replyTop, null, quote,
+                            null, true, 0, 0, null, null, 0L, false, 0L, 0L, null);
+                }
             } catch (Throwable t) {
                 FileLog.e(t);
             }
         });
     }
 
+    /**
+     * A minimal MessageObject standing for message {@code messageId} in {@code dialogId}, so plugins
+     * can reply by id (exteraGram's send_text(peer, text, replyToMsg=9876)). The cached real
+     * message is preferred when the dialog is open.
+     */
+    public static MessageObject replyStub(int account, long dialogId, int messageId) {
+        final int acc = account >= 0 && account < UserConfig.MAX_ACCOUNT_COUNT ? account : UserConfig.selectedAccount;
+        try {
+            MessagesController controller = MessagesController.getInstance(acc);
+            android.util.SparseArray<MessageObject> cached = controller.dialogMessagesByIds;
+            if (cached != null) {
+                MessageObject existing = cached.get(messageId);
+                if (existing != null && existing.getDialogId() == dialogId) {
+                    return existing;
+                }
+            }
+            TLRPC.TL_message message = new TLRPC.TL_message();
+            message.id = messageId;
+            message.dialog_id = dialogId;
+            message.peer_id = controller.getPeer(dialogId);
+            message.from_id = new TLRPC.TL_peerUser();
+            message.message = "";
+            return new MessageObject(acc, message, false, false);
+        } catch (Throwable t) {
+            FileLog.e(t);
+            return null;
+        }
+    }
+
     /** Edit a MessageObject's text/caption or replace its media with a local document path. */
     public static void editMessage(Object messageObject, String text, Object entities,
+                                   String path, boolean hasMediaSpoilers) {
+        int account = messageObject instanceof MessageObject ? ((MessageObject) messageObject).currentAccount : UserConfig.selectedAccount;
+        editMessage(account, messageObject, text, entities, path, hasMediaSpoilers);
+    }
+
+    public static void editMessage(int account, Object messageObject, String text, Object entities,
                                    String path, boolean hasMediaSpoilers) {
         if (!(messageObject instanceof MessageObject)) {
             return;
@@ -186,7 +250,6 @@ public final class PluginUtils {
         }
         AndroidUtilities.runOnUIThread(() -> {
             try {
-                int account = UserConfig.selectedAccount;
                 if (path != null && path.length() > 0) {
                     SendMessagesHelper.prepareSendingDocument(
                             AccountInstance.getInstance(account),

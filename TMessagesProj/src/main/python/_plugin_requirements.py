@@ -91,7 +91,7 @@ def requirements_from_source(path):
     if value is None:
         return []
     if isinstance(value, str):
-        value = [value]
+        value = value.split(",")  # "humanize, tinydb, cachetools" is a common spelling
     if not isinstance(value, (list, tuple)) or not all(isinstance(item, str) for item in value):
         raise RequirementInstallError("__requirements__ must be a string or a list of strings")
     return [item.strip() for item in value if item.strip()]
@@ -108,6 +108,49 @@ def ensure_requirements(path):
         except InvalidRequirement as exc:
             raise RequirementInstallError(f"invalid plugin requirement {text!r}: {exc}") from exc
         _ensure(requirement, visiting)
+
+
+def ensure_requirement_strings(texts):
+    """Install PEP 508 requirement strings (Elyx metainfo ``requirements``)."""
+    if _root is None:
+        raise RequirementInstallError("plugin dependency directory is not configured")
+    visiting = set()
+    for text in texts:
+        try:
+            requirement = Requirement(str(text).strip())
+        except InvalidRequirement as exc:
+            raise RequirementInstallError(f"invalid plugin requirement {text!r}: {exc}") from exc
+        _ensure(requirement, visiting)
+
+
+def activate_wheels(plugin_id, wheels_dir):
+    """Extract an Elyx plugin's bundled pure-Python wheels and put them on sys.path."""
+    if _root is None or not os.path.isdir(str(wheels_dir)):
+        return
+    target_root = _root.parent / "plugins" / "elyx_local_libs" / str(plugin_id)
+    target_root.mkdir(parents=True, exist_ok=True)
+    wanted = set()
+    for name in sorted(os.listdir(str(wheels_dir))):
+        if not name.endswith(".whl"):
+            continue
+        stem = name[:-4]
+        wanted.add(stem)
+        destination = target_root / stem
+        if not destination.is_dir():
+            content = Path(str(wheels_dir), name).read_bytes()
+            if len(content) > _MAX_WHEEL_BYTES:
+                raise RequirementInstallError(f"bundled wheel is too large: {name}")
+            staging = Path(tempfile.mkdtemp(prefix=".install-", dir=str(target_root)))
+            try:
+                _extract_wheel(content, staging)
+                os.replace(str(staging), str(destination))
+            except Exception:
+                shutil.rmtree(staging, ignore_errors=True)
+                raise
+        _activate(destination)
+    for child in target_root.iterdir():
+        if child.is_dir() and child.name not in wanted and not child.name.startswith(".install-"):
+            shutil.rmtree(child, ignore_errors=True)  # wheels dropped by a plugin update
 
 
 def _ensure(requirement, visiting):

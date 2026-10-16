@@ -4336,10 +4336,16 @@ public class AndroidUtilities {
 
     public static boolean openForView(File f, String fileName, String mimeType, final Activity activity, Theme.ResourcesProvider resourcesProvider, boolean restrict) {
         if (f != null && f.exists()) {
+            // ZaStoGram: plugins may claim file extensions (file_utils.FilesController).
+            if (org.telegram.plugins.PluginsController.fileHandlersActive
+                    && org.telegram.plugins.PluginsController.getInstance().dispatchFileOpen(f, fileName, activity)) {
+                return true;
+            }
             // ZaStoGram: a .plugin opened in-app (e.g. tapped in a chat) -> review-and-install dialog,
             // not an external viewer/browser.
-            if (fileName != null && fileName.length() >= 7
-                    && fileName.regionMatches(true, fileName.length() - 7, ".plugin", 0, 7)
+            if (fileName != null && ((fileName.length() >= 7
+                    && fileName.regionMatches(true, fileName.length() - 7, ".plugin", 0, 7))
+                    || org.telegram.plugins.ElyxArchive.isElyxFileName(fileName))
                     && org.telegram.ui.Plugins.PluginsActivity.offerInstall(activity, f)) {
                 return true;
             }
@@ -4404,7 +4410,12 @@ public class AndroidUtilities {
             f = FileLoader.getInstance(message.currentAccount).getPathToMessage(message.messageOwner);
         }
         String mimeType = message.type == MessageObject.TYPE_FILE || message.type == MessageObject.TYPE_TEXT ? message.getMimeType() : null;
-        return openForView(f, message.getFileName(), mimeType, activity, resourcesProvider, restrict);
+        org.telegram.plugins.PluginsController.openingMessage.set(message); // FilesController.OnClickArgs.message
+        try {
+            return openForView(f, message.getFileName(), mimeType, activity, resourcesProvider, restrict);
+        } finally {
+            org.telegram.plugins.PluginsController.openingMessage.remove();
+        }
     }
 
     public static boolean openForView(TLRPC.Document document, boolean forceCache, Activity activity) {

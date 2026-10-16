@@ -214,6 +214,9 @@ class _FactoryBridge:
             return java_plugin
 
     def create_view(self, context, list_view, current_account, class_guid, resources_provider):
+        if self._owner.create_view_fn is None:  # released factory
+            from android.view import View
+            return View(context)
         return self._owner.create_view_fn(context, list_view, current_account, class_guid, resources_provider)
 
     def bind_view(self, view, item, divider, adapter, list_view):
@@ -270,3 +273,12 @@ class SimpleSettingFactory:
 
     def __call__(self, *args, **kwargs):
         return Custom(factory=self.java, factory_args=args or None, **kwargs)
+
+    def release(self):
+        """Drop the Python callbacks; rows already built from this factory stop updating."""
+        self.create_view_fn = None
+        self.bind_view_fn = None
+        self.create_item = None
+        self.on_click = None
+        self.on_long_click = None
+        self.attached_view = None

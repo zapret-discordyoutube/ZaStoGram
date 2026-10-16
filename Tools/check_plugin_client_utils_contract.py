@@ -62,7 +62,7 @@ def main() -> int:
                    for node in request_callback.body):
             errors.append("RequestCallback must implement run(response, error)")
 
-    if "RequestCallback(on_complete)" not in source:
+    if "RequestCallback(on_complete" not in source:
         errors.append("send_request must wrap Python callbacks with RequestCallback")
 
     for queue_name in (
@@ -132,14 +132,23 @@ def main() -> int:
         if "SendMessagesHelper.prepareSendingDocuments(" not in java_source:
             errors.append("PluginUtils.sendDocument must call prepareSendingDocuments overload with entities")
 
-    send_audio = functions.get("send_audio")
-    if send_audio is not None:
-        args = [arg.arg for arg in send_audio.args.args]
-        if args[:2] != ["peer_id", "audio_path"]:
-            errors.append("send_audio signature must start with peer_id, audio_path")
-        if not any(isinstance(node, ast.Return) and call_name(getattr(node, "value", None)) == "send_document"
-                   for node in ast.walk(send_audio)):
-            errors.append("send_audio must delegate to send_document until native audio metadata send is available")
+    for name, kind in (("send_audio", "audio"), ("send_photo", "photo"), ("send_video", "video"),
+                       ("send_document", "document")):
+        fn = functions.get(name)
+        if fn is None:
+            errors.append(f"client_utils must export {name}")
+            continue
+        args = [arg.arg for arg in fn.args.args]
+        if args[:2] != ["peer_id", args[1]] or len(args) < 2:
+            errors.append(f"{name} signature must start with peer_id and a file path")
+        if "account" not in args:
+            errors.append(f"{name} must accept account= (exteraGram SDK 1.4.5.0 multi-account)")
+        if not any(isinstance(node, ast.Constant) and node.value == kind for node in ast.walk(fn)):
+            errors.append(f"{name} must send through _send_media({kind!r}, ...)")
+    if "PluginUtils.sendMedia(" not in source:
+        errors.append("_send_media must call PluginUtils.sendMedia")
+    if java_source and "prepareSendingMedia(" not in java_source:
+        errors.append("PluginUtils.sendMedia must send photos/videos through prepareSendingMedia")
 
     if errors:
         return fail(errors)

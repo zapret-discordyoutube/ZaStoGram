@@ -34,9 +34,15 @@ REQUIRED_FILES = {
 REQUIRED_JAVA_FILES = {
     "com/exteragram/messenger/plugins/PythonPluginsEngine.java": [
         "loadPlugins(Object ignored)", "reloadPluginsFromDisk()",
+        "Map<String, Object> pluginInstances", "getPluginInstance(", "getAllPluginSettings(String id)",
     ],
     "com/exteragram/messenger/plugins/PluginsController.java": [
-        "engines.put(\"python\"", "setPluginEnabled(String id, boolean enabled, Object ignored)",
+        "public static final LinkedHashMap<String, PythonPluginsEngine> engines",
+        "engines.put(PluginsConstants.PYTHON", "getEngines()", "getPluginPath(String id)",
+        "loadPluginSettings(String id)", "setPluginEnabled(String id, boolean enabled, Object ignored)",
+    ],
+    "com/exteragram/messenger/plugins/PluginsConstants.java": [
+        "PYTHON = \"python\"", "APP_START = \"start\"", "ON_APP_EVENT",
     ],
     "org/telegram/plugins/PluginsController.java": [
         "installedFileForId(String id)", "id + \".plugin\"", "id + \".py\"",

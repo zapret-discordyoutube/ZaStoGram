@@ -20,6 +20,7 @@ REQUIRED_PACKAGES = {
     "PyYAML": "YAML parser listed by exteraGram",
     "pyfiglet": "used by ASCII art generator plugins",
     "requests": "used by networked plugin helpers",
+    "typing_extensions": "imported by ZwyLib, the most used library plugin",
 }
 
 

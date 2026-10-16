@@ -13,9 +13,71 @@ Runnable = jclass("java.lang.Runnable")
 NotificationCenterDelegateInterface = jclass("org.telegram.messenger.NotificationCenter$NotificationCenterDelegate")
 
 
+import threading
+
+from android_utils import log  # exteraGram plugins import log from client_utils too
+
+
 def get_last_fragment():
     """The top-most visible BaseFragment, or None."""
     return PluginUtils.getLastFragment()
+
+
+get_current_fragment = get_last_fragment
+
+
+# ---------------------------------------------------------------- account scope
+# exteraGram SDK 1.4.5.0 multi-account rules: helpers without `account` use the account selected
+# in the UI; the account a hook/queue/request callback is handling is tracked as the "hook
+# account" and a mismatch is reported once per helper.
+
+_scope = threading.local()
+_warned_helpers = set()
+
+
+def get_selected_account():
+    """The account selected in the UI (UserConfig.selectedAccount)."""
+    return int(PluginUtils.getCurrentAccount())
+
+
+def get_hook_account():
+    """The account the current hook / queued work / request callback is handling, else None."""
+    return getattr(_scope, "account", None)
+
+
+class account_scope:
+    """Context manager the host uses around callbacks: ``with account_scope(account): ...``."""
+
+    def __init__(self, account):
+        self.account = None if account is None else int(account)
+
+    def __enter__(self):
+        self.previous = getattr(_scope, "account", None)
+        _scope.account = self.account
+        return self.account
+
+    def __exit__(self, *exc):
+        _scope.account = self.previous
+        return False
+
+
+def _resolve_account(account, helper):
+    if account is not None:
+        return int(account)
+    selected = get_selected_account()
+    handling = get_hook_account()
+    if handling is not None and handling != selected and helper not in _warned_helpers:
+        _warned_helpers.add(helper)
+        try:
+            from log_utils import Logger
+            Logger("pysdk").warning(
+                "%s() is using account %s because it is the one selected in the UI, but it was "
+                "called while handling account %s. Pass account=%s, or use get_client(%s), if you "
+                "meant that account. Logged once per helper.",
+                helper, selected, handling, handling, handling, stacklevel=3)
+        except Exception:
+            pass
+    return selected
 
 
 def get_context():
@@ -27,51 +89,59 @@ def get_current_account():
     return PluginUtils.getCurrentAccount()
 
 
+def get_client(account=None):
+    """An AccountClient bound to ``account`` (default: the hook account, else the selected one)."""
+    if account is None:
+        account = get_hook_account()
+    if account is None:
+        account = get_selected_account()
+    return AccountClient(int(account))
+
+
 # ---------------------------------------------------------------- controllers
 # Everything below mirrors exteraGram's client_utils: a thin facade over
 # AccountInstance.getInstance(account).getXxx(). `account` defaults to the
 # currently-selected account.
 
-def get_account_instance(account=None):
-    """The AccountInstance hub for the given (or current) account."""
-    acc = get_current_account() if account is None else int(account)
-    return AccountInstance.getInstance(acc)
+def get_account_instance(account=None, _helper="get_account_instance"):
+    """The AccountInstance hub for the given (or selected) account."""
+    return AccountInstance.getInstance(_resolve_account(account, _helper))
 
 
 def get_messages_controller(account=None):
-    return get_account_instance(account).getMessagesController()
+    return get_account_instance(account, "get_messages_controller").getMessagesController()
 
 
 def get_messages_storage(account=None):
-    return get_account_instance(account).getMessagesStorage()
+    return get_account_instance(account, "get_messages_storage").getMessagesStorage()
 
 
 def get_connections_manager(account=None):
-    return get_account_instance(account).getConnectionsManager()
+    return get_account_instance(account, "get_connections_manager").getConnectionsManager()
 
 
 def get_send_messages_helper(account=None):
-    return get_account_instance(account).getSendMessagesHelper()
+    return get_account_instance(account, "get_send_messages_helper").getSendMessagesHelper()
 
 
 def get_media_data_controller(account=None):
-    return get_account_instance(account).getMediaDataController()
+    return get_account_instance(account, "get_media_data_controller").getMediaDataController()
 
 
 def get_contacts_controller(account=None):
-    return get_account_instance(account).getContactsController()
+    return get_account_instance(account, "get_contacts_controller").getContactsController()
 
 
 def get_notifications_controller(account=None):
-    return get_account_instance(account).getNotificationsController()
+    return get_account_instance(account, "get_notifications_controller").getNotificationsController()
 
 
 def get_notification_center(account=None):
-    return get_account_instance(account).getNotificationCenter()
+    return get_account_instance(account, "get_notification_center").getNotificationCenter()
 
 
 def get_notifications_settings(account=None):
-    return get_account_instance(account).getNotificationsSettings()
+    return get_account_instance(account, "get_notifications_settings").getNotificationsSettings()
 
 
 def get_media_controller():
@@ -79,32 +149,32 @@ def get_media_controller():
 
 
 def get_location_controller(account=None):
-    return get_account_instance(account).getLocationController()
+    return get_account_instance(account, "get_location_controller").getLocationController()
 
 
 def get_download_controller(account=None):
-    return get_account_instance(account).getDownloadController()
+    return get_account_instance(account, "get_download_controller").getDownloadController()
 
 
 def get_secret_chat_helper(account=None):
-    return get_account_instance(account).getSecretChatHelper()
+    return get_account_instance(account, "get_secret_chat_helper").getSecretChatHelper()
 
 
 def get_file_loader(account=None):
-    return get_account_instance(account).getFileLoader()
+    return get_account_instance(account, "get_file_loader").getFileLoader()
 
 
 def get_file_ref_controller(account=None):
-    return get_account_instance(account).getFileRefController()
+    return get_account_instance(account, "get_file_ref_controller").getFileRefController()
 
 
 def get_stats_controller(account=None):
-    return get_account_instance(account).getStatsController()
+    return get_account_instance(account, "get_stats_controller").getStatsController()
 
 
 def get_user_id(account=None):
     """The logged-in user's id (clientUserId) for the given/current account."""
-    return get_account_instance(account).getUserConfig().getClientUserId()
+    return get_account_instance(account, "get_user_id").getUserConfig().getClientUserId()
 
 
 class _UserConfigProxy:
@@ -131,9 +201,10 @@ class _UserConfigProxy:
         setattr(self.__dict__["_uc"], name, value)
 
 
-def get_user_config():
-    uc = PluginUtils.getUserConfig()
-    return _UserConfigProxy(uc, PluginUtils.getCurrentAccount())
+def get_user_config(account=None):
+    acc = _resolve_account(account, "get_user_config")
+    from org.telegram.messenger import UserConfig
+    return _UserConfigProxy(UserConfig.getInstance(acc), acc)
 
 
 # ---------------------------------------------------------------- threading
@@ -151,10 +222,12 @@ class _Runnable(dynamic_proxy(Runnable)):
     def __init__(self, fn):
         super().__init__()
         self.fn = fn
+        self.account = get_hook_account()  # queued work keeps the scope it was scheduled from
 
     def run(self):
         try:
-            self.fn()
+            with account_scope(self.account):
+                self.fn()
         except Exception as e:
             from android_utils import log
             log(e)
@@ -194,43 +267,64 @@ def _kwarg(kwargs, camel_name, snake_name, default=None):
     return kwargs.get(snake_name, default)
 
 
-def send_document(dialog_id, file_path, caption="", replyToMsg=None, replyToTopMsg=None, replyQuote=None, **kwargs):
-    """Send a local file as a document to a dialog. Reply/quote args are optional."""
+def _reply_object(value, account, peer):
+    """replyToMsg may be a MessageObject or a plain message id (exteraGram accepts both)."""
+    if value is None or isinstance(value, bool):
+        return value
+    if isinstance(value, int):
+        return PluginUtils.replyStub(int(account), int(peer), int(value))
+    return value
+
+
+def _send_media(kind, peer_id, file_path, caption="", account=None, replyToMsg=None,
+                replyToTopMsg=None, replyQuote=None, high_quality=False, with_spoiler=False, **kwargs):
+    acc = _resolve_account(account, "send_" + kind)
     replyToMsg = _kwarg(kwargs, "replyToMsg", "reply_to_msg", replyToMsg)
     replyToTopMsg = _kwarg(kwargs, "replyToTopMsg", "reply_to_top_msg", replyToTopMsg)
     replyQuote = _kwarg(kwargs, "replyQuote", "reply_quote", replyQuote)
     caption_entities = _kwarg(kwargs, "captionEntities", "caption_entities", kwargs.get("entities"))
+    high_quality = bool(_kwarg(kwargs, "sendingHighQuality", "high_quality", high_quality))
+    with_spoiler = bool(_kwarg(kwargs, "hasMediaSpoilers", "has_media_spoilers", with_spoiler))
     parse_mode = kwargs.get("parse_mode")
     if parse_mode and caption is not None:
         parsed_caption = parse_text(caption, parse_mode, is_caption=True)
         caption = parsed_caption.get("caption", caption)
         caption_entities = parsed_caption.get("entities", caption_entities)
-    PluginUtils.sendDocument(
-        int(dialog_id), str(file_path), caption if caption is not None else "",
-        _java_list(caption_entities), replyToMsg, replyToTopMsg, replyQuote)
+    PluginUtils.sendMedia(
+        int(acc), int(peer_id), str(file_path), caption if caption is not None else "",
+        _java_list(caption_entities),
+        _reply_object(replyToMsg, acc, peer_id), _reply_object(replyToTopMsg, acc, peer_id), replyQuote,
+        kind, high_quality, with_spoiler)
 
 
-def send_text(peer_id, text, parse_mode=None, **kwargs):
+def send_document(peer_id, file_path, caption="", replyToMsg=None, replyToTopMsg=None, replyQuote=None,
+                  account=None, **kwargs):
+    """Send a local file as a document."""
+    return _send_media("document", peer_id, file_path, caption, account, replyToMsg, replyToTopMsg,
+                       replyQuote, **kwargs)
+
+
+def send_photo(peer_id, photo_path, caption="", high_quality=False, account=None, **kwargs):
+    """Send a local image as a photo (compressed; high_quality=True keeps more detail)."""
+    return _send_media("photo", peer_id, photo_path, caption, account, high_quality=high_quality, **kwargs)
+
+
+def send_video(peer_id, video_path, caption="", account=None, **kwargs):
+    """Send a local video; size, duration and thumbnail are filled in by Telegram's sender."""
+    return _send_media("video", peer_id, video_path, caption, account, **kwargs)
+
+
+def send_audio(peer_id, audio_path, caption="", account=None, **kwargs):
+    """Send a local audio file; title/performer/duration are read from the file."""
+    return _send_media("audio", peer_id, audio_path, caption, account, **kwargs)
+
+
+def send_text(peer_id, text, parse_mode=None, account=None, **kwargs):
     """Send a text message using exteraGram-style positional arguments."""
     params = dict(kwargs)
     params["peer"] = peer_id
     params["message"] = text
-    return send_message(params, parse_mode=parse_mode)
-
-
-def send_audio(peer_id, audio_path, caption="", **kwargs):
-    """Send a local audio file; currently dispatched through Telegram's document sender."""
-    return send_document(peer_id, audio_path, caption, **kwargs)
-
-
-def send_photo(peer_id, photo_path, caption="", **kwargs):
-    """Send a local photo file; currently dispatched through Telegram's document sender."""
-    return send_document(peer_id, photo_path, caption, **kwargs)
-
-
-def send_video(peer_id, video_path, caption="", **kwargs):
-    """Send a local video file; currently dispatched through Telegram's document sender."""
-    return send_document(peer_id, video_path, caption, **kwargs)
+    return send_message(params, account=account, parse_mode=parse_mode)
 
 
 # dict-key -> public SendMessageParams field name (only where they differ)
@@ -323,6 +417,11 @@ def send_message(params, account=None, parse_mode=None):
     if peer is None:
         raise ValueError("send_message: missing target ('peer'/'dialog_id')")
     peer = int(peer)
+    acc = _resolve_account(account if account is not None else params.get("account"), "send_message")
+
+    for key in ("replyToMsg", "reply_to_msg", "replyToTopMsg", "reply_to_top_msg"):
+        if key in params:
+            params[key] = _reply_object(params[key], acc, peer)
 
     text = params.get("message", params.get("text"))
     spm = SendMessagesHelper.SendMessageParams.of("" if text is None else str(text), peer)
@@ -337,12 +436,13 @@ def send_message(params, account=None, parse_mode=None):
         else:
             _set_param_field(spm, _SEND_ALIASES.get(k, k), v)
 
-    helper = get_send_messages_helper(account)
+    helper = get_send_messages_helper(acc)
     run_on_ui_thread(lambda: helper.sendMessage(spm))
     return spm
 
 
-def edit_message(message_obj, text=None, file_path=None, parse_mode=None, with_spoiler=False, **kwargs):
+def edit_message(message_obj, text=None, file_path=None, parse_mode=None, with_spoiler=False, account=None,
+                 **kwargs):
     """Edit a MessageObject's text/caption, or replace media with a local file."""
     entities = kwargs.get("entities")
     if text is not None and parse_mode:
@@ -350,7 +450,13 @@ def edit_message(message_obj, text=None, file_path=None, parse_mode=None, with_s
         text = parsed.get("message", text)
         entities = parsed.get("entities")
     has_media_spoilers = kwargs.get("has_media_spoilers", kwargs.get("hasMediaSpoilers", with_spoiler))
+    if account is None:
+        try:
+            account = int(message_obj.currentAccount)
+        except Exception:
+            account = _resolve_account(None, "edit_message")
     PluginUtils.editMessage(
+        int(account),
         message_obj,
         None if text is None else str(text),
         _java_list(entities),
@@ -360,15 +466,17 @@ def edit_message(message_obj, text=None, file_path=None, parse_mode=None, with_s
 
 
 class RequestCallback(dynamic_proxy(RequestDelegate)):
-    def __init__(self, fn=None):
+    def __init__(self, fn=None, account=None):
         super().__init__()
         self.fn = fn
+        self.account = account
 
     def run(self, response, error):
         if self.fn is None:
             return
         try:
-            self.fn(response, error)
+            with account_scope(self.account if self.account is not None else get_hook_account()):
+                self.fn(response, error)
         except Exception as e:
             from android_utils import log
             log(e)
@@ -394,25 +502,93 @@ class NotificationCenterDelegate(dynamic_proxy(NotificationCenterDelegateInterfa
             log(e)
 
 
-def _coerce_request_callback(on_complete):
+def _coerce_request_callback(on_complete, account=None):
     if on_complete is None:
         return None
     if isinstance(on_complete, RequestCallback):
+        if on_complete.account is None:
+            on_complete.account = account
         return on_complete
     if hasattr(on_complete, "run") and not callable(on_complete):
         return on_complete
-    return RequestCallback(on_complete)
+    return RequestCallback(on_complete, account)
 
 
-def send_request(request, on_complete=None, flags=None, connection_type=None):
+def send_request(request, on_complete=None, flags=None, connection_type=None, account=None):
     """
-    Send a raw TL request via ConnectionsManager. `on_complete(response, error)` is invoked
-    on the network thread (wrap UI work in run_on_ui_thread). Returns the request token (int).
+    Send a raw TL request via ConnectionsManager of ``account`` (default: selected account).
+    `on_complete(response, error)` runs on the network thread with that account in scope (wrap UI
+    work in run_on_ui_thread). Returns the request token (int).
     """
-    cm = get_connections_manager()
-    delegate = _coerce_request_callback(on_complete)
+    acc = _resolve_account(account, "send_request")
+    cm = get_connections_manager(acc)
+    delegate = _coerce_request_callback(on_complete, acc)
     if flags is None:
         return cm.sendRequest(request, delegate)
     if connection_type is None:
         return cm.sendRequest(request, delegate, int(flags))
     return cm.sendRequest(request, delegate, int(flags), int(connection_type))
+
+
+# ---------------------------------------------------------------- AccountClient
+
+class AccountClient:
+    """client_utils bound to one account: ``self.client(account).send_text(peer, "hi")``."""
+
+    def __init__(self, account):
+        self.account = int(account)
+
+    def __repr__(self):
+        return f"AccountClient(account={self.account})"
+
+    def get_account_instance(self):
+        return get_account_instance(self.account)
+
+    def get_user_config(self):
+        return get_user_config(self.account)
+
+    def get_user_id(self):
+        return get_user_id(self.account)
+
+    def send_request(self, request, on_complete=None, flags=None, connection_type=None):
+        return send_request(request, on_complete, flags, connection_type, account=self.account)
+
+    def send_message(self, params, parse_mode=None):
+        return send_message(params, account=self.account, parse_mode=parse_mode)
+
+    def send_text(self, peer_id, text, parse_mode=None, **kwargs):
+        return send_text(peer_id, text, parse_mode=parse_mode, account=self.account, **kwargs)
+
+    def send_document(self, peer_id, file_path, caption="", **kwargs):
+        return send_document(peer_id, file_path, caption, account=self.account, **kwargs)
+
+    def send_photo(self, peer_id, photo_path, caption="", **kwargs):
+        return send_photo(peer_id, photo_path, caption, account=self.account, **kwargs)
+
+    def send_video(self, peer_id, video_path, caption="", **kwargs):
+        return send_video(peer_id, video_path, caption, account=self.account, **kwargs)
+
+    def send_audio(self, peer_id, audio_path, caption="", **kwargs):
+        return send_audio(peer_id, audio_path, caption, account=self.account, **kwargs)
+
+    def edit_message(self, message_obj, text=None, file_path=None, parse_mode=None, with_spoiler=False, **kwargs):
+        return edit_message(message_obj, text, file_path, parse_mode, with_spoiler, account=self.account, **kwargs)
+
+
+def _bind_getter(name):
+    fn = globals()[name]
+
+    def method(self):
+        return fn(self.account)
+    method.__name__ = name
+    return method
+
+
+for _name in ("get_messages_controller", "get_messages_storage", "get_connections_manager",
+              "get_send_messages_helper", "get_media_data_controller", "get_contacts_controller",
+              "get_notifications_controller", "get_notification_center", "get_notifications_settings",
+              "get_location_controller", "get_download_controller", "get_secret_chat_helper",
+              "get_file_loader", "get_file_ref_controller", "get_stats_controller"):
+    setattr(AccountClient, _name, _bind_getter(_name))
+AccountClient.get_media_controller = staticmethod(get_media_controller)
+del _name

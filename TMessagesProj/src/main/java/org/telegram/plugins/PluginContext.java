@@ -215,6 +215,22 @@ public class PluginContext {
     }
 
     /** All persisted settings for this plugin (backs BasePlugin.export_settings). */
+    public void removeSetting(String key) {
+        try {
+            prefs().edit().remove(key).apply();
+        } catch (Throwable t) {
+            FileLog.e(t);
+        }
+    }
+
+    public void clearSettings() {
+        try {
+            prefs().edit().clear().apply();
+        } catch (Throwable t) {
+            FileLog.e(t);
+        }
+    }
+
     public java.util.Map<String, ?> getAllSettings() {
         try {
             return prefs().getAll();
@@ -277,6 +293,7 @@ public class PluginContext {
                 } else {
                     pyHook.callAttr("before_hooked_method", param);
                 }
+                coerceResult(param);
             } catch (Throwable t) {
                 PluginsController.logError(pluginId, replacement ? "replace_hooked_method" : "before_hooked_method", t);
             }
@@ -289,9 +306,43 @@ public class PluginContext {
             }
             try {
                 pyHook.callAttr("after_hooked_method", param);
+                coerceResult(param);
             } catch (Throwable t) {
                 PluginsController.logError(pluginId, "after_hooked_method", t);
             }
+        }
+
+        /**
+         * Python ints arrive as Integer/Long and floats as Double whatever the hooked method
+         * returns; unboxing a mismatched box (Integer for a long method) throws inside the app.
+         * Convert the result to the method's own return type.
+         */
+        private static void coerceResult(MethodHookParam param) {
+            if (param.hasThrowable() || !(param.method instanceof java.lang.reflect.Method)) {
+                return;
+            }
+            Object result = param.getResult();
+            Class<?> type = ((java.lang.reflect.Method) param.method).getReturnType();
+            // Only re-box a value that is already set: setResult() in a before-hook would skip the
+            // original method, so an unset (null) result must stay untouched.
+            if (result instanceof Number && (type.isPrimitive() || Number.class.isAssignableFrom(type))
+                    && !type.isInstance(result)) {
+                Object converted = coerceNumber((Number) result, type);
+                if (converted != null) {
+                    param.setResult(converted);
+                }
+            }
+        }
+
+        private static Object coerceNumber(Number n, Class<?> type) {
+            if (type == int.class || type == Integer.class) return n.intValue();
+            if (type == long.class || type == Long.class) return n.longValue();
+            if (type == float.class || type == Float.class) return n.floatValue();
+            if (type == double.class || type == Double.class) return n.doubleValue();
+            if (type == short.class || type == Short.class) return n.shortValue();
+            if (type == byte.class || type == Byte.class) return n.byteValue();
+            if (type == char.class || type == Character.class) return (char) n.intValue();
+            return null;
         }
     }
 }

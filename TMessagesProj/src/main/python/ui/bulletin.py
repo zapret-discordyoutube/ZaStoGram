@@ -25,6 +25,15 @@ def _raw(name, fallback="info"):
 
 
 def _factory(fragment):
+    """Given fragment, else the visible one when it can host a bulletin, else the global layer."""
+    if fragment is None:
+        try:
+            from org.telegram.plugins import PluginUtils
+            candidate = PluginUtils.getLastFragment()
+            if candidate is not None and BulletinFactory.canShowBulletin(candidate):
+                fragment = candidate
+        except Exception:
+            fragment = None
     if fragment is not None:
         try:
             return BulletinFactory.of(fragment)
@@ -52,6 +61,14 @@ def _runnable(fn):
         return None
     from android_utils import R
     return R(fn)
+
+
+def _file_type(name):
+    file_type_enum = jclass("org.telegram.ui.Components.BulletinFactory$FileType")
+    try:
+        return file_type_enum.valueOf(name)
+    except Exception:
+        return file_type_enum.UNKNOWN
 
 
 class _BulletinHelperMeta(type):
@@ -109,10 +126,24 @@ class BulletinHelper(metaclass=_BulletinHelperMeta):
 
     @staticmethod
     def show_undo(text, on_undo, on_action=None, subtitle=None, fragment=None, *args, **kwargs):
-        button = jclass("org.telegram.messenger.LocaleController").getString("Undo")
-        _show(lambda f: f.createSimpleBulletin(
-            _raw("info"), str(text), str(subtitle) if subtitle else None,
-            button, _runnable(on_undo)), fragment)
+        """Undo bulletin; on_action runs when it closes without Undo being pressed."""
+        if subtitle:
+            _show(lambda f: f.createUndoBulletin(
+                str(text), str(subtitle), _runnable(on_undo), _runnable(on_action)), fragment)
+        else:
+            _show(lambda f: f.createUndoBulletin(
+                str(text), _runnable(on_undo), _runnable(on_action)), fragment)
+
+    @staticmethod
+    def show_file_saved_to_gallery(is_video=False, amount=1, fragment=None, *args, **kwargs):
+        file_type = _file_type(("VIDEOS" if amount > 1 else "VIDEO") if is_video
+                               else ("PHOTOS" if amount > 1 else "PHOTO"))
+        _show(lambda f: f.createDownloadBulletin(file_type, int(amount), None), fragment)
+
+    @staticmethod
+    def show_file_saved_to_downloads(file_type_enum_name="UNKNOWN", amount=1, fragment=None, *args, **kwargs):
+        file_type = _file_type(str(file_type_enum_name or "UNKNOWN").upper())
+        _show(lambda f: f.createDownloadBulletin(file_type, int(amount), None), fragment)
 
     @staticmethod
     def show_copied_to_clipboard(message=None, fragment=None, *args, **kwargs):

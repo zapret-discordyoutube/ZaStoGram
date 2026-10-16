@@ -13,6 +13,10 @@ public class PluginInfo {
     public String author;
     public String version;
     public String minVersion;
+    /** Raw __app_version__ expression such as ">=12.5.1" or ">=12.0, <13" (null if absent). */
+    public String appVersionSpec;
+    /** Raw __sdk_version__ expression such as ">=1.4.5.0" (null if absent). */
+    public String sdkVersionSpec;
     public String icon;
 
     /** Absolute path of the stored .plugin file inside files/plugins/. */

@@ -36,6 +36,7 @@ jobs:
             Tools/check_plugin_python_deps.py
             Tools/check_plugin_runtime_requirements.py
             Tools/check_plugin_utils_javadoc.py
+            Tools/check_plugin_sdk_runtime.py
             Tools/check_android_string_format_contract.py
             Tools/check_login_firebase_independence.py
             Tools/check_notification_mute_ownership.py

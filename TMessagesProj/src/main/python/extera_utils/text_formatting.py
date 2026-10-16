@@ -59,9 +59,13 @@ class RawEntity:
             entity.collapsed = bool(self.collapsed)
         return entity
 
+    # Names used by exteraGram's markdown_utils and older plugin samples.
+    to_tlrpc_object = to_tl_entity
+    to_tlrpc = to_tl_entity
+
 
 def _utf16_len(value: str) -> int:
-    return len(value.encode("utf-16-le")) // 2
+    return len(value.encode("utf-16-le", errors="surrogatepass")) // 2
 
 
 def _entity_length(start: int, end: int) -> int:
@@ -134,7 +138,10 @@ class _HtmlEntityParser(HTMLParser):
             document_id = attrs_dict.get("id") or attrs_dict.get("document_id")
             if not document_id:
                 return
-            meta["document_id"] = int(document_id)
+            try:
+                meta["document_id"] = int(str(document_id).strip())
+            except ValueError:
+                return
         elif entity_type is TLEntityType.BLOCKQUOTE:
             meta["collapsed"] = "collapsed" in attrs_dict or "expandable" in attrs_dict
 
@@ -169,124 +176,336 @@ def _add_entity(entities: list[RawEntity], entity_type: TLEntityType, start: int
         entities.append(RawEntity(entity_type, start, length, **kwargs))
 
 
+_MD_ESCAPABLE = set("\\`*_~|[]()>#+-=.!{}")
+
+
+class _Builder:
+    """Accumulates plain text while tracking the UTF-16 offset in O(1) per append."""
+
+    def __init__(self):
+        self.parts: list[str] = []
+        self.offset = 0
+        self.entities: list[RawEntity] = []
+
+    def add(self, value: str) -> None:
+        if value:
+            self.parts.append(value)
+            self.offset += _utf16_len(value)
+
+    def entity(self, entity_type: TLEntityType, start: int, **kwargs) -> None:
+        _add_entity(self.entities, entity_type, start, self.offset, **kwargs)
+
+    def merge(self, text: str, entities: list[RawEntity]) -> None:
+        base = self.offset
+        self.add(text)
+        for entity in entities:
+            entity.offset += base
+            self.entities.append(entity)
+
+    def text(self) -> str:
+        return "".join(self.parts)
+
+
+def _is_word(ch: str) -> bool:
+    return ch.isalnum()
+
+
+def _find_unescaped(text: str, needle: str, start: int) -> int:
+    """Index of the next unescaped ``needle`` outside inline code spans, or -1."""
+    i = start
+    n = len(text)
+    while i < n:
+        ch = text[i]
+        if ch == "\\":
+            i += 2
+            continue
+        if text.startswith(needle, i):
+            return i
+        if ch == "`" and needle != "`":
+            fence = "```" if text.startswith("```", i) else "`"
+            close = text.find(fence, i + len(fence))
+            if close < 0:
+                i += 1
+                continue
+            i = close + len(fence)
+            continue
+        i += 1
+    return -1
+
+
+def _closing_marker(text: str, marker: str, start: int) -> int:
+    """Find the closing delimiter for an emphasis marker, honouring word boundaries."""
+    i = start
+    while True:
+        close = _find_unescaped(text, marker, i)
+        if close < 0:
+            return -1
+        if close == start:
+            return -1  # empty span: "**", "____" stay literal
+        if text[close - 1].isspace():
+            i = close + 1
+            continue
+        after = text[close + len(marker)] if close + len(marker) < len(text) else ""
+        if marker in ("_", "__") and after and _is_word(after):
+            i = close + 1
+            continue  # intraword: snake_case_name
+        if len(marker) == 1 and after == marker:
+            # "*a**" / "_a__": the doubled run belongs to a longer marker; keep looking.
+            i = close + 2
+            continue
+        return close
+
+
+_MARKERS = (
+    ("**", TLEntityType.BOLD),
+    ("__", TLEntityType.UNDERLINE),
+    ("||", TLEntityType.SPOILER),
+    ("~~", TLEntityType.STRIKETHROUGH),
+    ("*", TLEntityType.BOLD),
+    ("_", TLEntityType.ITALIC),
+    ("~", TLEntityType.STRIKETHROUGH),
+)
+
+
+def _match_link(text: str, index: int):
+    """Parse ``[label](url)`` at ``index``; returns (label, url, end) or None."""
+    if text[index] != "[":
+        return None
+    i = index + 1
+    depth = 1
+    while i < len(text):
+        ch = text[i]
+        if ch == "\\":
+            i += 2
+            continue
+        if ch == "[":
+            depth += 1
+        elif ch == "]":
+            depth -= 1
+            if depth == 0:
+                break
+        elif ch == "\n" and text.startswith("\n\n", i):
+            return None
+        i += 1
+    else:
+        return None
+    label_end = i
+    if label_end + 1 >= len(text) or text[label_end + 1] != "(":
+        return None
+    j = label_end + 2
+    depth = 1
+    url_chars = []
+    while j < len(text):
+        ch = text[j]
+        if ch == "\\" and j + 1 < len(text):
+            url_chars.append(text[j + 1])
+            j += 2
+            continue
+        if ch == "(":
+            depth += 1
+        elif ch == ")":
+            depth -= 1
+            if depth == 0:
+                break
+        elif ch in "\n":
+            return None
+        url_chars.append(ch)
+        j += 1
+    else:
+        return None
+    return text[index + 1:label_end], "".join(url_chars).strip(), j + 1
+
+
+_EMOJI_URL = re.compile(r"^(?:tg://emoji\?id=)?(\d+)$")
+
+
+def _parse_fence(text: str, index: int):
+    """``` fenced block at ``index``; returns (code, language, end) or None."""
+    close = text.find("```", index + 3)
+    if close < 0:
+        return None
+    block = text[index + 3:close]
+    language = ""
+    if "\n" in block:
+        first, rest = block.split("\n", 1)
+        if not first.strip() or re.fullmatch(r"[A-Za-z0-9_+#.-]+", first.strip()):
+            language = first.strip()
+            block = rest
+    if block.endswith("\n"):
+        block = block[:-1]
+    return block, language, close + 3
+
+
 def _parse_inline_markdown(text: str) -> tuple[str, list[RawEntity]]:
-    out: list[str] = []
-    entities: list[RawEntity] = []
+    out = _Builder()
     index = 0
+    n = len(text)
+    while index < n:
+        ch = text[index]
 
-    def offset() -> int:
-        return _utf16_len("".join(out))
+        if ch == "\\" and index + 1 < n and text[index + 1] in _MD_ESCAPABLE:
+            out.add(text[index + 1])
+            index += 2
+            continue
 
-    def append_plain(value: str) -> None:
-        out.append(value)
-
-    def append_parsed(value: str) -> tuple[int, int]:
-        start = offset()
-        inner_text, inner_entities = _parse_inline_markdown(value)
-        append_plain(inner_text)
-        for entity in inner_entities:
-            entity.offset += start
-            entities.append(entity)
-        return start, offset()
-
-    while index < len(text):
         if text.startswith("```", index):
-            close = text.find("```", index + 3)
-            if close >= 0:
-                block = text[index + 3:close]
-                language = ""
-                if "\n" in block:
-                    first, rest = block.split("\n", 1)
-                    if re.fullmatch(r"[A-Za-z0-9_+-]+", first.strip()):
-                        language = first.strip()
-                        block = rest
-                start = offset()
-                append_plain(block)
-                _add_entity(entities, TLEntityType.PRE, start, offset(), language=language)
+            fence = _parse_fence(text, index)
+            if fence is not None:
+                code, language, index = fence
+                start = out.offset
+                out.add(code)
+                out.entity(TLEntityType.PRE, start, language=language)
+                continue
+
+        if ch == "`":
+            close = text.find("`", index + 1)
+            if close > index + 1:
+                start = out.offset
+                out.add(text[index + 1:close])
+                out.entity(TLEntityType.CODE, start)
+                index = close + 1
+                continue
+
+        if ch == "!" and index + 1 < n and text[index + 1] == "[":
+            link = _match_link(text, index + 1)
+            if link is not None:
+                label, url, end = link
+                emoji = _EMOJI_URL.match(url)
+                if emoji:
+                    start = out.offset
+                    out.add(label)
+                    out.entity(TLEntityType.CUSTOM_EMOJI, start, document_id=int(emoji.group(1)))
+                    index = end
+                    continue
+
+        if ch == "[":
+            link = _match_link(text, index)
+            if link is not None:
+                label, url, end = link
+                emoji = _EMOJI_URL.match(url)
+                start = out.offset
+                if emoji:
+                    out.add(label)
+                    out.entity(TLEntityType.CUSTOM_EMOJI, start, document_id=int(emoji.group(1)))
+                else:
+                    out.merge(*_parse_inline_markdown(label))
+                    out.entity(TLEntityType.TEXT_LINK, start, url=url)
+                index = end
+                continue
+
+        if text.startswith("***", index) and index + 3 < n and not text[index + 3].isspace():
+            close = _find_unescaped(text, "***", index + 3)
+            if close > index + 3 and not text[close - 1].isspace():
+                start = out.offset
+                out.merge(*_parse_inline_markdown(text[index + 3:close]))
+                out.entity(TLEntityType.BOLD, start)
+                out.entity(TLEntityType.ITALIC, start)
                 index = close + 3
                 continue
 
-        emoji_match = re.match(r"!\[([^\]]*)\]\(tg://emoji\?id=(\d+)\)", text[index:])
-        if emoji_match:
-            label, document_id = emoji_match.groups()
-            start = offset()
-            append_plain(label)
-            _add_entity(entities, TLEntityType.CUSTOM_EMOJI, start, offset(), document_id=int(document_id))
-            index += emoji_match.end()
-            continue
-
-        link_match = re.match(r"\[([^\]]+)\]\(([^)]+)\)", text[index:])
-        if link_match:
-            label, url = link_match.groups()
-            start, end = append_parsed(label)
-            _add_entity(entities, TLEntityType.TEXT_LINK, start, end, url=url)
-            index += link_match.end()
-            continue
-
         matched = False
-        for marker, entity_type in (
-            ("**", TLEntityType.BOLD),
-            ("__", TLEntityType.UNDERLINE),
-            ("||", TLEntityType.SPOILER),
-            ("`", TLEntityType.CODE),
-            ("*", TLEntityType.BOLD),
-            ("_", TLEntityType.ITALIC),
-            ("~", TLEntityType.STRIKETHROUGH),
-        ):
+        for marker, entity_type in _MARKERS:
             if not text.startswith(marker, index):
                 continue
-            close = text.find(marker, index + len(marker))
+            body_start = index + len(marker)
+            if body_start >= n or text[body_start].isspace():
+                continue
+            if marker in ("_", "__") and index > 0 and _is_word(text[index - 1]):
+                continue  # intraword underscore
+            close = _closing_marker(text, marker, body_start)
             if close < 0:
                 continue
-            start, end = append_parsed(text[index + len(marker):close])
-            _add_entity(entities, entity_type, start, end)
+            start = out.offset
+            out.merge(*_parse_inline_markdown(text[body_start:close]))
+            out.entity(entity_type, start)
             index = close + len(marker)
             matched = True
             break
         if matched:
             continue
 
-        append_plain(text[index])
+        out.add(ch)
         index += 1
 
-    return "".join(out), entities
+    return out.text(), out.entities
+
+
+def _split_markdown_blocks(text: str):
+    """Yield (kind, payload, collapsed) segments: plain text or merged '>' quote blocks.
+
+    Lines inside ``` fences are never treated as quotes.
+    """
+    lines = text.splitlines(True)
+    in_fence = False
+    plain: list[str] = []
+    quote: list[str] = []
+    collapsed = False
+
+    def flush_quote():
+        nonlocal quote, collapsed
+        if quote:
+            body = "".join(quote)
+            trailing = ""
+            if body.endswith("\n"):
+                body, trailing = body[:-1], "\n"
+            if collapsed and body.endswith("||"):
+                body = body[:-2]
+            yield ("quote", body, collapsed)
+            if trailing:
+                yield ("plain", trailing, False)
+        quote = []
+        collapsed = False
+
+    for line in lines:
+        if not in_fence:
+            stripped = line
+            is_quote = False
+            if line.startswith("**>"):
+                is_quote, stripped = True, line[3:]
+                if not quote:
+                    collapsed = True
+            elif line.startswith(">"):
+                is_quote, stripped = True, line[1:]
+            if is_quote:
+                if plain:
+                    yield ("plain", "".join(plain), False)
+                    plain = []
+                if stripped.startswith(" "):
+                    stripped = stripped[1:]
+                quote.append(stripped)
+                continue
+            if quote:
+                yield from flush_quote()
+        if line.count("```") % 2 == 1:
+            in_fence = not in_fence
+        plain.append(line)
+    if quote:
+        yield from flush_quote()
+    if plain:
+        yield ("plain", "".join(plain), False)
+
+
+def _sort_entities(entities: list[RawEntity]) -> list[RawEntity]:
+    return sorted(entities, key=lambda e: (e.offset, -e.length))
 
 
 def _parse_markdown(text: str) -> tuple[str, list[RawEntity]]:
-    out: list[str] = []
-    entities: list[RawEntity] = []
-
-    def offset() -> int:
-        return _utf16_len("".join(out))
-
-    for line in text.splitlines(True):
-        collapsed = False
-        quote = False
-        if line.startswith("**> "):
-            quote = True
-            collapsed = True
-            line = line[4:]
-        elif line.startswith("> "):
-            quote = True
-            line = line[2:]
-
-        start = offset()
-        parsed, line_entities = _parse_inline_markdown(line)
-        out.append(parsed)
-        for entity in line_entities:
-            entity.offset += start
-            entities.append(entity)
-        if quote:
-            _add_entity(entities, TLEntityType.BLOCKQUOTE, start, offset(), collapsed=collapsed)
-
-    return "".join(out), entities
+    out = _Builder()
+    for kind, payload, collapsed in _split_markdown_blocks(text):
+        start = out.offset
+        out.merge(*_parse_inline_markdown(payload))
+        if kind == "quote":
+            out.entity(TLEntityType.BLOCKQUOTE, start, collapsed=collapsed)
+    return out.text(), _sort_entities(out.entities)
 
 
 def _parse_html(text: str) -> tuple[str, list[RawEntity]]:
     parser = _HtmlEntityParser()
     parser.feed(text)
     parser.close()
-    return "".join(parser.parts), parser.entities
+    for tag, _entity_type, _start, _meta in reversed(list(parser.stack)):
+        parser.handle_endtag(tag)  # an unclosed tag spans to the end of the text
+    return "".join(parser.parts), _sort_entities(parser.entities)
 
 
 def parse_text(text: str, parse_mode: str | None = "HTML", is_caption: bool = False) -> dict[str, object]:

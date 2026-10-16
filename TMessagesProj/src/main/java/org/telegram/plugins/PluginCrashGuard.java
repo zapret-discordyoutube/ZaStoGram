@@ -68,22 +68,38 @@ final class PluginCrashGuard {
     static PluginInfo findCulprit(Throwable t) {
         boolean python = false;
         String pluginFile = null;
+        String elyxId = null;
         for (Throwable e = t; e != null && e.getCause() != e; e = e.getCause()) {
             if (e instanceof PyException) {
                 python = true;
             }
             for (StackTraceElement frame : e.getStackTrace()) {
                 final String file = frame.getFileName();
+                final String cls = frame.getClassName();
                 if (file != null
                         && file.endsWith(PLUGIN_FILE_SUFFIX)
-                        && frame.getClassName().startsWith("<python>")) {
+                        && cls.startsWith("<python>")) {
                     pluginFile = file;
                     break;
                 }
+                // Elyx plugins run as modules named ElyxPlugins.<id>.<...>
+                int elyx = cls.indexOf("ElyxPlugins.");
+                if (cls.startsWith("<python>") && elyx >= 0) {
+                    String rest = cls.substring(elyx + "ElyxPlugins.".length());
+                    int dot = rest.indexOf('.');
+                    elyxId = dot > 0 ? rest.substring(0, dot) : rest;
+                    break;
+                }
+            }
+            if (elyxId != null) {
+                break;
             }
             if (pluginFile != null) {
                 break;
             }
+        }
+        if (elyxId != null) { // a <python> frame of the plugin's own module
+            return PluginsController.getInstance().findById(elyxId);
         }
         if (!python || pluginFile == null) {
             return null;

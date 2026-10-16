@@ -16,3 +16,23 @@ def get_private_field(obj, name):
 def set_private_field(obj, name, value):
     """Write a (possibly private) field by name. Returns True on success."""
     return PluginUtils.setPrivateField(obj, name, value)
+
+
+def get_static_private_field(clazz, name):
+    """Read a static field (private or not) of a java.lang.Class or class name."""
+    if isinstance(clazz, str):
+        clazz = find_class(clazz)
+    return PluginUtils.getPrivateField(clazz, name)
+
+
+def set_static_private_field(clazz, name, value):
+    if isinstance(clazz, str):
+        clazz = find_class(clazz)
+    return PluginUtils.setPrivateField(clazz, name, value)
+
+
+# Short names used by some community plugins.
+get_field = get_private_field
+set_field = set_private_field
+get_static_field = get_static_private_field
+set_static_field = set_static_private_field

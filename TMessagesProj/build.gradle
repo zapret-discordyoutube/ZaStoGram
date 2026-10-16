@@ -114,6 +114,8 @@ dependencies {
     // 0.2.0 declares no dependency on :core, so it coexists with core:0.3.0. If runtime ART
     // hooking ever misbehaves from version skew, pin core down to 0.2.9 to match.
     implementation 'top.canyie.pine:xposed:0.2.0'
+    // ZaStoGram plugin engine: runtime Java subclasses for extera_utils.classes (exteraGram uses DexMaker too)
+    implementation 'com.linkedin.dexmaker:dexmaker:2.28.6'
 
     coreLibraryDesugaring 'com.android.tools:desugar_jdk_libs:2.1.5'
 }
@@ -371,6 +373,7 @@ chaquopy {
             install "PyYAML"         // YAML parser bundled by exteraGram
             install "pyfiglet"       // ASCIIGenerator and ASCII art plugins
             install "requests"       // th3_proxy_tools (country flags via ip-api, URL import) + many others
+            install "typing_extensions" // ZwyLib and plugins built on it import it unconditionally
         }
     }
 }

@@ -1,9 +1,12 @@
 package com.exteragram.messenger.plugins;
 
+import org.telegram.messenger.MessageObject;
 import org.telegram.plugins.PluginInfo;
 import org.telegram.ui.ActionBar.BaseFragment;
 
+import java.io.File;
 import java.util.LinkedHashMap;
+import java.util.Map;
 
 /**
  * Compatibility bridge: exposes exteraGram's {@code com.exteragram.messenger.plugins.PluginsController}
@@ -16,11 +19,119 @@ public class PluginsController {
 
     /** id -> Plugin, mirroring exteraGram's public field. Kept fresh by refresh(). */
     public final LinkedHashMap<String, Plugin> plugins = new LinkedHashMap<>();
-    /** Engine registry used by managers which write plugin files directly. */
-    public final LinkedHashMap<String, PythonPluginsEngine> engines = new LinkedHashMap<>();
+    /** Engine registry (exteraGram keeps it static: PluginsController.engines.get(PluginsConstants.PYTHON)). */
+    public static final LinkedHashMap<String, PythonPluginsEngine> engines = new LinkedHashMap<>();
+
+    static {
+        engines.put(PluginsConstants.PYTHON, new PythonPluginsEngine());
+    }
+
+    /** Directory of installed plugin files (exteraGram exposes it as a File field). */
+    public final File pluginsDir;
 
     private PluginsController() {
-        engines.put("python", new PythonPluginsEngine());
+        File dir = null;
+        try {
+            dir = org.telegram.plugins.PluginsController.getInstance().pluginsDir();
+        } catch (Throwable ignore) {
+        }
+        pluginsDir = dir;
+    }
+
+    public static Map<String, PythonPluginsEngine> getEngines() {
+        return engines;
+    }
+
+    public PythonPluginsEngine getPluginEngine(String id) {
+        return engines.get(PluginsConstants.PYTHON);
+    }
+
+    private static org.telegram.plugins.PluginsController host() {
+        return org.telegram.plugins.PluginsController.getInstance();
+    }
+
+    public String getPluginPath(String id) {
+        PluginInfo info = host().findById(id);
+        return info != null ? info.filePath : null;
+    }
+
+    /** Re-render an open settings screen of this plugin after its settings changed. */
+    public void loadPluginSettings(String id) {
+        new org.telegram.plugins.PluginContext(id).reloadSettings();
+    }
+
+    public static boolean isPlugin(MessageObject messageObject) {
+        if (messageObject == null) {
+            return false;
+        }
+        try {
+            String name = messageObject.getDocumentName();
+            return name != null && (name.toLowerCase().endsWith(".plugin") || name.toLowerCase().endsWith(".py"));
+        } catch (Throwable t) {
+            return false;
+        }
+    }
+
+    public static boolean validatePluginFromFile(String path) {
+        try {
+            PluginInfo info = org.telegram.plugins.PluginsController.parseMetadata(new File(path));
+            return info != null && info.id != null;
+        } catch (Throwable t) {
+            return false;
+        }
+    }
+
+    public void loadPluginFromFile(String path, Object callback) {
+        host().installFromFile(new File(path));
+    }
+
+    public void loadPluginFromFile(String path) {
+        host().installFromFile(new File(path));
+    }
+
+    public void deletePlugin(String id) {
+        host().deletePlugin(id);
+    }
+
+    public void deletePlugin(String id, Object ignored) {
+        host().deletePlugin(id);
+    }
+
+    public void unloadPlugin(String id) {
+        host().setEnabled(id, false);
+    }
+
+    public void loadPlugin(String id) {
+        host().setEnabled(id, true);
+    }
+
+    public boolean isPluginEnabled(String id) {
+        PluginInfo info = host().findById(id);
+        return info != null && info.enabled;
+    }
+
+    public boolean isPluginPinned(String id) {
+        return false;
+    }
+
+    public void runOnPluginsQueue(Runnable runnable) {
+        org.telegram.plugins.PluginUtils.runOnQueue("pluginsQueue", runnable, 0);
+    }
+
+    public void init() {
+        host().reloadPluginsFromDisk();
+    }
+
+    public void restart() {
+        host().reloadPluginsFromDisk();
+    }
+
+    public void shutdown() {
+        // ZaStoGram keeps one engine for the process; restart() reloads plugins from disk.
+    }
+
+    public void removeMenuItemsByPluginId(String pluginId) {
+        // Menu items live on the plugin instance; disabling/reloading the plugin drops them.
     }
 
     public static PluginsController getInstance() {
@@ -48,6 +159,10 @@ public class PluginsController {
     public Plugin getPlugin(String id) {
         refresh();
         return plugins.get(id);
+    }
+
+    public void setPluginEnabled(String id, boolean enabled) {
+        setPluginEnabled(id, enabled, null);
     }
 
     public void setPluginEnabled(String id, boolean enabled, Object ignored) {

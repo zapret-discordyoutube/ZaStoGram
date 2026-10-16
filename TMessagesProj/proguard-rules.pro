@@ -47,6 +47,9 @@
 -keep class com.chaquo.python.** { *; }
 -keep class top.canyie.pine.** { *; }
 -keep class de.robv.android.xposed.** { *; }
+# DexMaker generates plugin proxy classes at runtime and reflects on its own/dx classes.
+-keep class com.android.dx.** { *; }
+-dontwarn com.android.dx.**
 -keep class com.android.internal.util.** { *; }
 -dontwarn com.chaquo.python.**
 -dontwarn top.canyie.pine.**

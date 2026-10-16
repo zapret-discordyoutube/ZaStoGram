@@ -132,7 +132,7 @@ public class PluginsActivity extends BaseFragment implements NotificationCenter.
             intent.setType("*/*");
             intent.addCategory(Intent.CATEGORY_OPENABLE);
             getParentActivity().startActivityForResult(
-                    Intent.createChooser(intent, "Выберите .plugin файл"), REQUEST_PICK);
+                    Intent.createChooser(intent, "Выберите файл плагина (.plugin, .elyx)"), REQUEST_PICK);
         } catch (Throwable t) {
             FileLog.e(t);
             BulletinFactory.of(this).createErrorBulletin("Не удалось открыть выбор файла").show();
@@ -160,7 +160,7 @@ public class PluginsActivity extends BaseFragment implements NotificationCenter.
             final PluginInfo result = info;
             AndroidUtilities.runOnUIThread(() -> {
                 if (result == null) {
-                    BulletinFactory.of(this).createErrorBulletin("Это не похоже на корректный .plugin файл").show();
+                    BulletinFactory.of(this).createErrorBulletin("Это не похоже на корректный файл плагина (.plugin, .elyx)").show();
                 } else {
                     updateRows();
                     if (adapter != null) {
@@ -204,9 +204,14 @@ public class PluginsActivity extends BaseFragment implements NotificationCenter.
         if (!TextUtils.isEmpty(meta.description)) {
             sb.append("\n\n").append(meta.description);
         }
-        if (!TextUtils.isEmpty(meta.minVersion) && PluginsController.compareVersions(
-                org.telegram.messenger.BuildConfig.BUILD_VERSION_STRING, meta.minVersion) < 0) {
-            sb.append("\n\n⚠ Требуется версия ").append(meta.minVersion).append("+");
+        String appSpec = meta.appVersionSpec != null ? meta.appVersionSpec
+                : (TextUtils.isEmpty(meta.minVersion) ? null : ">=" + meta.minVersion);
+        if (!PluginsController.versionMatches(org.telegram.messenger.BuildConfig.BUILD_VERSION_STRING, appSpec)) {
+            sb.append("\n\n⚠ Требуется версия приложения ").append(appSpec);
+        }
+        if (!PluginsController.versionMatches(PluginsController.SDK_VERSION, meta.sdkVersionSpec)) {
+            sb.append("\n\n⚠ Требуется SDK плагинов ").append(meta.sdkVersionSpec)
+                    .append(" (в приложении ").append(PluginsController.SDK_VERSION).append(")");
         }
         org.telegram.ui.ActionBar.AlertDialog.Builder builder =
                 new org.telegram.ui.ActionBar.AlertDialog.Builder(activity);

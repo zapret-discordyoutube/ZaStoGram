@@ -56,10 +56,7 @@ public class PluginsController {
     private PyObject loader; // _plugin_loader module
 
     private final List<PluginInfo> plugins = new ArrayList<>();
-    private final Map<String, PluginContext> contexts = new HashMap<>();
-
-    private static final Pattern META_PATTERN =
-            Pattern.compile("^__(\\w+)__\\s*=\\s*(?:'((?:[^'\\\\]|\\\\.)*)'|\"((?:[^\"\\\\]|\\\\.)*)\")");
+    private final Map<String, PluginContext> contexts = new java.util.concurrent.ConcurrentHashMap<>();
 
     public static PluginsController getInstance() {
         PluginsController local = instance;
@@ -250,6 +247,24 @@ public class PluginsController {
                 seen.add(id);
             }
         }
+        File[] elyxDirs = elyxRoot().listFiles();
+        if (elyxDirs != null) {
+            for (File dir : elyxDirs) {
+                String id = dir.getName();
+                if (seen.contains(id) || !isValidId(id) || !ElyxArchive.isPluginDirectory(dir)) {
+                    continue;
+                }
+                PluginInfo info = parseMetadata(dir);
+                if (info == null) {
+                    continue;
+                }
+                info.id = id;
+                info.filePath = dir.getAbsolutePath();
+                info.enabled = prefs().getBoolean("enabled_" + id, true);
+                list.add(info);
+                seen.add(id);
+            }
+        }
         synchronized (plugins) {
             plugins.clear();
             plugins.addAll(list);
@@ -258,7 +273,21 @@ public class PluginsController {
     }
 
     /** Prefer the most recently written extension when a manager leaves both behind. */
+    /** Extracted Elyx plugins live in plugins/ElyxPlugins/<id>/ (exteraGram's layout). */
+    public File elyxRoot() {
+        File dir = new File(pluginsDir(), "ElyxPlugins");
+        if (!dir.exists()) {
+            //noinspection ResultOfMethodCallIgnored
+            dir.mkdirs();
+        }
+        return dir;
+    }
+
     private File installedFileForId(String id) {
+        File elyx = new File(elyxRoot(), id);
+        if (ElyxArchive.isPluginDirectory(elyx)) {
+            return elyx;
+        }
         File plugin = new File(pluginsDir(), id + ".plugin");
         File python = new File(pluginsDir(), id + ".py");
         if (plugin.exists() && python.exists()) {
@@ -331,24 +360,49 @@ public class PluginsController {
     }
 
     /** Pure-Java parse of the module-level __dunder__ metadata (no Python needed). */
+    /** Plugin SDK level this host implements (exteraGram __sdk_version__ numbering). */
+    public static final String SDK_VERSION = "1.4.5.3";
+
+    private static final Pattern META_START =
+            Pattern.compile("^__(\\w+)__\\s*(?::[^=]*)?=\\s*(.*)$");
+
+    /**
+     * Read module-level dunder metadata without executing the plugin. Mirrors exteraGram's AST
+     * reading for the forms plugins actually use: single/double/triple-quoted strings, string
+     * prefixes, implicit concatenation, parenthesised multi-line values and type annotations.
+     */
     public static PluginInfo parseMetadata(File file) {
+        if (file.isDirectory() || ElyxArchive.isZip(file)) {
+            return ElyxArchive.readMetadata(file); // Elyx structured plugin (directory or archive)
+        }
         PluginInfo info = new PluginInfo();
         boolean found = false;
         try (BufferedReader r = new BufferedReader(new InputStreamReader(
                 new FileInputStream(file), java.nio.charset.StandardCharsets.UTF_8))) {
+            List<String> lines = new ArrayList<>();
             String line;
-            int scanned = 0;
-            while ((line = r.readLine()) != null && scanned < 200) {
-                scanned++;
-                if (scanned == 1 && !line.isEmpty() && line.charAt(0) == '﻿') {
+            while ((line = r.readLine()) != null && lines.size() < 4000) {
+                if (lines.isEmpty() && !line.isEmpty() && line.charAt(0) == '\uFEFF') {
                     line = line.substring(1); // strip UTF-8 BOM (mirrors Python _read_source utf-8-sig)
                 }
-                Matcher m = META_PATTERN.matcher(line); // not trim(): keep the ^ anchor at column 0 (module-level only)
+                lines.add(line);
+            }
+            for (int i = 0; i < lines.size(); i++) {
+                Matcher m = META_START.matcher(lines.get(i)); // column 0 only: module-level assignments
                 if (!m.find()) {
                     continue;
                 }
                 String key = m.group(1);
-                String value = unescapePy(m.group(2) != null ? m.group(2) : m.group(3));
+                StringBuilder expr = new StringBuilder(m.group(2));
+                int j = i;
+                while (!isCompleteExpression(expr) && j + 1 < lines.size() && j - i < 60) {
+                    expr.append('\n').append(lines.get(++j));
+                }
+                String value = literalValue(expr.toString());
+                i = j;
+                if (value == null) {
+                    continue;
+                }
                 found = true;
                 switch (key) {
                     case "id": info.id = value; break;
@@ -356,8 +410,17 @@ public class PluginsController {
                     case "description": info.description = value; break;
                     case "author": info.author = value; break;
                     case "version": info.version = value; break;
-                    case "min_version": info.minVersion = value; break;
-                    case "app_version": info.minVersion = value; break; // ">=X"; compareVersions strips the operator
+                    case "min_version":
+                        if (info.appVersionSpec == null) {
+                            info.minVersion = value;
+                            info.appVersionSpec = ">=" + value.replaceAll("^[<>=!\\s]+", "");
+                        }
+                        break;
+                    case "app_version":
+                        info.appVersionSpec = value;
+                        info.minVersion = lowerBound(value);
+                        break;
+                    case "sdk_version": info.sdkVersionSpec = value; break;
                     case "icon": info.icon = value; break;
                     default: break;
                 }
@@ -368,7 +431,163 @@ public class PluginsController {
         return found ? info : null;
     }
 
-    /** Unescape a Python string-literal body (\\', \\", \\\\, \\n, \\t, ...) captured by META_PATTERN. */
+    /** True once brackets are balanced and no string literal is left open. */
+    private static boolean isCompleteExpression(CharSequence s) {
+        int depth = 0;
+        int i = 0;
+        int n = s.length();
+        while (i < n) {
+            char c = s.charAt(i);
+            if (c == '#') {
+                while (i < n && s.charAt(i) != '\n') i++;
+                continue;
+            }
+            if (c == '\'' || c == '"') {
+                boolean triple = i + 2 < n && s.charAt(i + 1) == c && s.charAt(i + 2) == c;
+                int end = findStringEnd(s, i, c, triple);
+                if (end < 0) {
+                    return false;
+                }
+                i = end;
+                continue;
+            }
+            if (c == '(' || c == '[' || c == '{') depth++;
+            if (c == ')' || c == ']' || c == '}') depth--;
+            i++;
+        }
+        if (depth > 0) {
+            return false;
+        }
+        String trimmed = s.toString().trim();
+        return !trimmed.endsWith("\\");
+    }
+
+    /** Index just past the closing quote of the literal opening at {@code start}, or -1. */
+    private static int findStringEnd(CharSequence s, int start, char quote, boolean triple) {
+        int i = start + (triple ? 3 : 1);
+        int n = s.length();
+        while (i < n) {
+            char c = s.charAt(i);
+            if (c == '\\') {
+                i += 2;
+                continue;
+            }
+            if (!triple && c == '\n') {
+                return -1;
+            }
+            if (c == quote) {
+                if (!triple) {
+                    return i + 1;
+                }
+                if (i + 2 < n && s.charAt(i + 1) == quote && s.charAt(i + 2) == quote) {
+                    return i + 3;
+                }
+            }
+            i++;
+        }
+        return -1;
+    }
+
+    /** Concatenated value of the string literals in an expression, or a bare number/name token. */
+    private static String literalValue(String expr) {
+        StringBuilder out = new StringBuilder();
+        boolean any = false;
+        int i = 0;
+        int n = expr.length();
+        while (i < n) {
+            char c = expr.charAt(i);
+            if (c == '#') {
+                while (i < n && expr.charAt(i) != '\n') i++;
+                continue;
+            }
+            boolean raw = false;
+            int q = i;
+            while (q < n && "rRbBuUfF".indexOf(expr.charAt(q)) >= 0 && q - i < 2) {
+                if (expr.charAt(q) == 'r' || expr.charAt(q) == 'R') raw = true;
+                q++;
+            }
+            if (q < n && (expr.charAt(q) == '\'' || expr.charAt(q) == '"')
+                    && (q == i || !Character.isLetterOrDigit(i > 0 ? expr.charAt(i - 1) : ' '))) {
+                char quote = expr.charAt(q);
+                boolean triple = q + 2 < n && expr.charAt(q + 1) == quote && expr.charAt(q + 2) == quote;
+                int end = findStringEnd(expr, q, quote, triple);
+                if (end < 0) {
+                    return any ? out.toString() : null;
+                }
+                String body = expr.substring(q + (triple ? 3 : 1), end - (triple ? 3 : 1));
+                out.append(raw ? body : unescapePy(body));
+                any = true;
+                i = end;
+                continue;
+            }
+            i++;
+        }
+        if (any) {
+            return out.toString();
+        }
+        String bare = expr.trim();
+        int comment = bare.indexOf('#');
+        if (comment >= 0) {
+            bare = bare.substring(0, comment).trim();
+        }
+        return bare.matches("[0-9][0-9.]*") ? bare : null;
+    }
+
+    /** The lowest version an expression admits, for display ("requires X+"). */
+    private static String lowerBound(String spec) {
+        if (spec == null) {
+            return null;
+        }
+        for (String part : spec.split(",")) {
+            String p = part.trim();
+            if (p.startsWith(">=") || p.startsWith("==")) {
+                return p.substring(2).trim();
+            }
+            if (p.startsWith(">")) {
+                return p.substring(1).trim();
+            }
+            if (!p.isEmpty() && Character.isDigit(p.charAt(0))) {
+                return p;
+            }
+        }
+        return null;
+    }
+
+    /** Evaluate "OPversion[, OPversion...]" (>=, <=, ==, !=, >, <; bare version means >=). */
+    public static boolean versionMatches(String version, String spec) {
+        if (spec == null || spec.trim().isEmpty()) {
+            return true;
+        }
+        for (String part : spec.split(",")) {
+            String p = part.trim();
+            if (p.isEmpty()) {
+                continue;
+            }
+            String op = ">=";
+            for (String candidate : new String[]{">=", "<=", "==", "!=", "~=", ">", "<", "="}) {
+                if (p.startsWith(candidate)) {
+                    op = candidate;
+                    p = p.substring(candidate.length()).trim();
+                    break;
+                }
+            }
+            int cmp = compareVersions(version, p);
+            boolean ok;
+            switch (op) {
+                case "<=": ok = cmp <= 0; break;
+                case "==": case "=": ok = cmp == 0; break;
+                case "!=": ok = cmp != 0; break;
+                case ">": ok = cmp > 0; break;
+                case "<": ok = cmp < 0; break;
+                default: ok = cmp >= 0; break; // ">=" and "~="
+            }
+            if (!ok) {
+                return false;
+            }
+        }
+        return true;
+    }
+
     private static String unescapePy(String s) {
         if (s == null || s.indexOf('\\') < 0) {
             return s;
@@ -415,7 +634,8 @@ public class PluginsController {
                 tmp.delete();
                 return null;
             }
-            File dest = new File(pluginsDir(), meta.id + ".plugin");
+            final boolean elyx = ElyxArchive.isZip(tmp);
+            File dest = elyx ? new File(elyxRoot(), meta.id) : new File(pluginsDir(), meta.id + ".plugin");
             // The old instance unload AND the file write both run on the queue below, so they are
             // FIFO-ordered with any pending delete (an off-queue file write could be clobbered by a
             // deletePlugin() that was queued just before a same-id reinstall). The staged temp file
@@ -437,12 +657,25 @@ public class PluginsController {
                 }
                 // Commit the file on the queue so it is ordered after any pending delete.
                 try {
-                    if (dest.exists()) {
+                    // A plugin switching format (.plugin <-> Elyx) must not leave the old copy behind.
+                    File oldPlugin = new File(pluginsDir(), toLoad.id + ".plugin");
+                    File oldPython = new File(pluginsDir(), toLoad.id + ".py");
+                    File oldElyx = new File(elyxRoot(), toLoad.id);
+                    if (elyx) {
                         //noinspection ResultOfMethodCallIgnored
-                        dest.delete();
-                    }
-                    if (!tmp.renameTo(dest)) {
-                        copyFile(tmp, dest);
+                        oldPlugin.delete();
+                        //noinspection ResultOfMethodCallIgnored
+                        oldPython.delete();
+                        ElyxArchive.extract(tmp, dest);
+                    } else {
+                        ElyxArchive.deleteRecursive(oldElyx);
+                        if (dest.exists()) {
+                            //noinspection ResultOfMethodCallIgnored
+                            dest.delete();
+                        }
+                        if (!tmp.renameTo(dest)) {
+                            copyFile(tmp, dest);
+                        }
                     }
                 } catch (Throwable t) {
                     FileLog.e(t);
@@ -515,6 +748,8 @@ public class PluginsController {
                     //noinspection ResultOfMethodCallIgnored
                     pythonVariant.delete();
                 }
+                ElyxArchive.deleteRecursive(new File(elyxRoot(), id));
+                ElyxArchive.deleteRecursive(new File(new File(pluginsDir(), "elyx_local_libs"), id));
             } catch (Throwable t) {
                 FileLog.e(t);
             }
@@ -935,6 +1170,49 @@ public class PluginsController {
 
     // ------------------------------------------------------------------ helpers
 
+    /** Set by file_utils.FilesController while any plugin has registered a file handler. */
+    public static volatile boolean fileHandlersActive;
+    /** The message whose file AndroidUtilities.openForView is opening on this thread, if any. */
+    public static final ThreadLocal<Object> openingMessage = new ThreadLocal<>();
+
+    public static void setFileHandlersActive(boolean active) {
+        fileHandlersActive = active;
+    }
+
+    /** Offer a file being opened to plugin FilesController handlers; true when one handled it. */
+    public boolean dispatchFileOpen(File file, String fileName, Object activity) {
+        if (!isPythonReady()) {
+            return false;
+        }
+        try {
+            PyObject handled = Python.getInstance().getModule("file_utils")
+                    .callAttr("_dispatch_file_open", file, fileName, openingMessage.get(), activity);
+            return handled != null && handled.toBoolean();
+        } catch (Throwable t) {
+            FileLog.e(t);
+            return false;
+        }
+    }
+
+    /** The live Python BasePlugin instance of a loaded plugin (a PyObject), or null. */
+    public Object getPluginInstance(String id) {
+        if (id == null || !isPythonReady() || !contexts.containsKey(id)) {
+            return null;
+        }
+        try {
+            PyObject inst = loader.callAttr("get_instance", id);
+            return inst;
+        } catch (Throwable t) {
+            FileLog.e(t);
+            return null;
+        }
+    }
+
+    /** Ids of the plugins whose Python instance is currently loaded. */
+    public List<String> getLoadedPluginIds() {
+        return new ArrayList<>(contexts.keySet());
+    }
+
     public List<PluginInfo> getPlugins() {
         synchronized (plugins) {
             return new ArrayList<>(plugins);
@@ -961,14 +1239,21 @@ public class PluginsController {
         if (info == null) {
             return false;
         }
-        if (TextUtils.isEmpty(info.minVersion)) {
-            return true;
+        String appSpec = info.appVersionSpec != null ? info.appVersionSpec
+                : (TextUtils.isEmpty(info.minVersion) ? null : ">=" + info.minVersion);
+        if (!versionMatches(BuildConfig.BUILD_VERSION_STRING, appSpec)) {
+            if (info.error == null) {
+                info.error = "requires app " + appSpec;
+            }
+            return false;
         }
-        boolean ok = compareVersions(BuildConfig.BUILD_VERSION_STRING, info.minVersion) >= 0;
-        if (!ok && info.error == null) {
-            info.error = "requires " + info.minVersion + "+";
+        if (!versionMatches(SDK_VERSION, info.sdkVersionSpec)) {
+            if (info.error == null) {
+                info.error = "requires plugin SDK " + info.sdkVersionSpec + " (this app has " + SDK_VERSION + ")";
+            }
+            return false;
         }
-        return ok;
+        return true;
     }
 
     /** Numeric dotted-version compare. Returns >0 if a>b, 0 if equal, <0 if a<b. */

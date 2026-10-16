@@ -91,6 +91,7 @@ jobs:
           python3 Tools/check_plugin_python_deps.py
           python3 Tools/check_plugin_runtime_requirements.py
           python3 Tools/check_plugin_utils_javadoc.py
+          python3 Tools/check_plugin_sdk_runtime.py
           python3 Tools/check_android_string_format_contract.py
           python3 Tools/check_login_firebase_independence.py
           python3 Tools/check_notification_mute_ownership.py

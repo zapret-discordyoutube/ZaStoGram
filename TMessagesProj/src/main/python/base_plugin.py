@@ -309,6 +309,9 @@ class MenuItemData:
 
 _DEFAULT_HOOK_PRIORITY = 50  # XCallback.PRIORITY_DEFAULT
 
+# Plugin SDK level this host implements (exteraGram numbering; Java: PluginsController.SDK_VERSION).
+SDK_VERSION = "1.4.5.3"
+
 
 class BasePlugin:
     # Class-level defaults: many community plugins define __init__ without calling
@@ -316,7 +319,26 @@ class BasePlugin:
     _context = None           # Java org.telegram.plugins.PluginContext
     id = None
     name = None
+    version = None
+    author = None
+    description = None
+    icon = None
+    enabled = False
+    error = None
     _send_message_hook = False  # set by add_on_send_message_hook()
+
+    @property
+    def logger(self):
+        """The SDK logger (log_utils.Logger) tagged plugin.<id>; a plugin's own value wins."""
+        own = self.__dict__.get("_own_logger")
+        if own is not None:
+            return own
+        from log_utils import plugin_logger
+        return plugin_logger(self.id or type(self).__name__)
+
+    @logger.setter
+    def logger(self, value):
+        self.__dict__["_own_logger"] = value
 
     def __init__(self):
         self._request_hooks = []  # (name, match_substring) filters from add_hook()
@@ -413,7 +435,15 @@ class BasePlugin:
 
     def hook_method(self, method, hook=None, priority=_DEFAULT_HOOK_PRIORITY, before=None,
                     after=None, before_filters=None, after_filters=None):
-        """Hook one Method/Constructor with a MethodHook/MethodReplacement or before=/after=."""
+        """Hook one Method/Constructor with a MethodHook/MethodReplacement or before=/after=.
+        Also accepts hook_method(class_or_name, "methodName", hook): every overload is hooked."""
+        if isinstance(hook, str):
+            method_name, hook = hook, priority
+            priority = _DEFAULT_HOOK_PRIORITY
+            if not hasattr(hook, "before_hooked_method") and not hasattr(hook, "replace_hooked_method"):
+                hook = None
+            return self.hook_all_methods(method, method_name, hook=hook, before=before, after=after,
+                                         before_filters=before_filters, after_filters=after_filters)
         hook = self._make_hook(hook, before, after, before_filters, after_filters)
         return self._context.hookMethod(method, hook, int(priority))
 
@@ -440,13 +470,24 @@ class BasePlugin:
             self._context.unhook(unhook)
 
     def add_hook(self, request_name, match_substring=False, priority=0):
-        """Register interest in a (TL) request name so pre/post_request_hook fires for it."""
-        self._own_list("_request_hooks").append((str(request_name), bool(match_substring)))
+        """Register interest in a (TL) request/update name so the matching hooks fire for it.
+        Plugins with a higher priority run first."""
+        self._own_list("_request_hooks").append((str(request_name), bool(match_substring), int(priority or 0)))
         return (request_name, match_substring)
 
     def add_on_send_message_hook(self, priority=0):
-        """Enable on_send_message_hook for this plugin."""
+        """Enable on_send_message_hook for this plugin (higher priority runs first)."""
         self._send_message_hook = True
+        self._send_message_priority = int(priority or 0)
+
+    def _hook_priority(self, request_name):
+        best = None
+        for entry in self.__dict__.get("_request_hooks") or ():
+            name, substring = entry[0], entry[1]
+            priority = entry[2] if len(entry) > 2 else 0
+            if (substring and name in str(request_name)) or name == str(request_name):
+                best = priority if best is None else max(best, priority)
+        return best or 0
 
     def remove_hook(self, hook_name):
         """Remove a named high-level hook using exteraGram's compatibility API."""
@@ -461,7 +502,8 @@ class BasePlugin:
     def _matches_request(self, request_name):
         if not self.__dict__.get("_request_hooks"):
             return None  # no filters → caller decides
-        for name, substring in self._request_hooks:
+        for entry in self._request_hooks:
+            name, substring = entry[0], entry[1]
             if substring:
                 if name in str(request_name):
                     return True
@@ -472,9 +514,12 @@ class BasePlugin:
     # ------------------------------------------------------------------ menu items
 
     def add_menu_item(self, item):
-        """Register a MenuItemData; it appears in the menu named by item.menu_type."""
+        """Register a MenuItemData; returns its id (an id is generated when item_id is None)."""
+        if getattr(item, "item_id", None) is None:
+            import uuid
+            item.item_id = "auto_" + uuid.uuid4().hex[:12]
         self._own_list("_menu_items").append(item)
-        return item.item_id if getattr(item, "item_id", None) is not None else item
+        return item.item_id
 
     def remove_menu_item(self, item_id):
         """Remove a previously added menu item by its item_id (or the object returned by add)."""
@@ -529,7 +574,7 @@ class BasePlugin:
             m = self._context.getAllSettings()
             if m is not None:
                 for k in m.keySet():
-                    out[str(k)] = m.get(k)
+                    out[str(k)] = _unbox(m.get(k))
         except Exception:
             pass
         return out
@@ -537,11 +582,14 @@ class BasePlugin:
     def import_settings(self, settings, reload_settings=True):
         if not settings:
             return
-        try:
-            for k, v in settings.items():
+        for k, v in dict(settings).items():
+            try:
+                if _is_structured_setting(v):
+                    v = json.dumps(v, ensure_ascii=False, separators=(",", ":"))
                 self._context.setSetting(str(k), v)
-        except Exception:
-            pass
+            except Exception:
+                import traceback
+                traceback.print_exc()
         if reload_settings:
             try:
                 self._context.reloadSettings()
@@ -549,6 +597,11 @@ class BasePlugin:
                 pass
 
     # ------------------------------------------------------------------ misc
+
+    def client(self, account=None):
+        """client_utils bound to one account (default: the account the current hook handles)."""
+        from client_utils import get_client
+        return get_client(account)
 
     def getName(self):
         return self.name or self.id
@@ -558,3 +611,22 @@ class BasePlugin:
             self._context.log(str(msg))
         except Exception:
             pass
+
+
+_JAVA_EXPORTS = {
+    "PluginsController": "com.exteragram.messenger.plugins.PluginsController",
+    "PluginsConstants": "com.exteragram.messenger.plugins.PluginsConstants",
+    "PythonPluginsEngine": "com.exteragram.messenger.plugins.PythonPluginsEngine",
+    "Plugin": "com.exteragram.messenger.plugins.Plugin",
+}
+
+
+def __getattr__(name):
+    """exteraGram's base_plugin also re-exports its Java plugin classes."""
+    target = _JAVA_EXPORTS.get(name)
+    if target is None:
+        raise AttributeError(f"module 'base_plugin' has no attribute {name!r}")
+    from java import jclass
+    value = jclass(target)
+    globals()[name] = value
+    return value
