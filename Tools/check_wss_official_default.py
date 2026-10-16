@@ -58,6 +58,10 @@ def main() -> None:
     require("if (!moveToNextRelayAddress(routeConfig))" in wss_cpp
             and "!isCdn(routeConfig) && !moveToNextRelayAddress(routeConfig)" in wss_cpp,
             "a failed relay address must hand the DC to its other ingress before the DNS name")
+    require("dcId == kNoRelayDcId" in wss_cpp
+            and "return CdnRoute(network, dcId, route) || TunnelRoute(network, dcAddress, route)" in wss_cpp
+            and "|| CdnRoute(network, dcId, route, true);" in wss_cpp,
+            "DC203 must go through the Cloudflare fronts before the tunnel and never direct")
     require("if (isCurrentTransportWss())" in connection_cpp
             and "useSecret = 0" in connection_cpp,
             "direct WSS must not inherit a TCP dcOption or MTProxy secret")

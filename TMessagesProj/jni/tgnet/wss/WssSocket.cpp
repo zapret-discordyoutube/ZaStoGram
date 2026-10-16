@@ -50,7 +50,12 @@ constexpr const char *kTunnelHosts[] = {
         "nodeone.brackencombe.workers.dev",
 };
 constexpr size_t kTunnelHostCount = sizeof(kTunnelHosts) / sizeof(kTunnelHosts[0]);
-constexpr int32_t kTunnelOnlyDcId = 203;
+// DC203 serves non-Premium media and has no kws relay. The Cloudflare fronts
+// carry it as kws203.<front> (16.10.2026: resPQ from every front tried), so
+// it goes fronts -> tunnel -> fronts like a DC with a closed relay. As a
+// tunnel-only DC it lost every file once the workers ran out of their daily
+// quota and the route fell back to direct TCP (desktop log 16.10, 19:20).
+constexpr int32_t kNoRelayDcId = 203;
 // Size of the MTProto obfuscation header. Measured against the official relays:
 // a first binary frame of 63 bytes never gets a reply, 64 always does.
 constexpr size_t kObfuscationHeaderSize = 64;
@@ -978,9 +983,11 @@ static bool CdnRoute(int32_t network, int32_t dcId, Route *route, bool ignoreSup
 }
 
 bool OfficialRoute(int32_t dcId, bool mediaConnection, bool testBackend, const std::string &dcAddress, Route *route) {
-    if (route != nullptr && !testBackend && dcId == kTunnelOnlyDcId) {
+    if (route != nullptr && !testBackend && dcId == kNoRelayDcId) {
         // DC203 отдаёт медиа аккаунтам без Premium и своего kws-релея не имеет.
-        return TunnelRoute(currentNetwork.load(), dcAddress, route);
+        const int32_t network = currentNetwork.load();
+        return CdnRoute(network, dcId, route) || TunnelRoute(network, dcAddress, route)
+                || CdnRoute(network, dcId, route, true);
     }
     if (route == nullptr || testBackend || dcId < 1 || dcId > 5) {
         return false;
