@@ -5,5 +5,7 @@
     <files-path name="cache" path="/cache/"/>
     <!-- Legacy Forgejo updater versions may leave a completed APK in Context.getCacheDir(). -->
     <cache-path name="update_cache" path="."/>
+    <external-files-path name="zasto_archive_ext" path="zasto_archive/"/>
+    <files-path name="zasto_archive" path="zasto_archive/"/>
     <root-path name="external_files" path="/storage/" />
 </paths>

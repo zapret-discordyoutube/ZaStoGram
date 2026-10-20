@@ -43,6 +43,7 @@ import org.telegram.messenger.PushListenerController;
 import org.telegram.messenger.SharedConfig;
 import org.telegram.messenger.StatsController;
 import org.telegram.messenger.UserConfig;
+import org.telegram.messenger.ZaStoAccountArchive;
 import org.telegram.messenger.Utilities;
 import org.telegram.proxy.WebProxyConnectionTester;
 import org.telegram.proxy.WebProxyFlow;
@@ -1408,6 +1409,8 @@ public class ConnectionsManager extends BaseController {
         AndroidUtilities.runOnUIThread(() -> {
             AccountInstance accountInstance = AccountInstance.getInstance(currentAccount);
             if (accountInstance.getUserConfig().getClientUserId() != 0) {
+                // ZaStoGram: the server dropped the session (deleted/banned account); save the local data first.
+                ZaStoAccountArchive.onForcedLogout(currentAccount);
                 accountInstance.getUserConfig().clearConfig();
                 accountInstance.getMessagesController().performLogout(0);
             }

@@ -5024,6 +5024,10 @@ public class MessagesController extends BaseController implements NotificationCe
                 getNotificationCenter().postNotificationName(NotificationCenter.appConfigUpdated);
             });
         }
+        if (isFrozen()) {
+            // ZaStoGram: a frozen account may be deleted later, keep a local copy while it is readable.
+            ZaStoAccountArchive.onFrozen(currentAccount, freezeSinceDate);
+        }
         if (liteAppOptions != null) {
             LiteMode.updatePresets(liteAppOptions);
         }

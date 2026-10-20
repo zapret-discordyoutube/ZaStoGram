@@ -88,6 +88,7 @@ import org.telegram.ui.Wallet.GramWallet;
 import org.telegram.ui.Wallet.WalletActivity;
 import org.telegram.utils.settings.SharedSettings;
 import org.telegram.messenger.UserConfig;
+import org.telegram.messenger.ZaStoAccountArchive;
 import org.telegram.messenger.UserObject;
 import org.telegram.messenger.browser.Browser;
 import org.telegram.tgnet.ConnectionsManager;
@@ -697,6 +698,8 @@ public class SettingsActivity extends BaseFragment implements NotificationCenter
         items.add(SettingCell.Factory.of(1004, IconBackgroundColors.BLUE.top, IconBackgroundColors.BLUE.bottom, R.drawable.settings_data, getString(R.string.FreeProxyChannels), "Каталог каналов и настройки прокси"));
         // ZaStoGram — экран логов (всегда виден): просмотр, выборочная отправка, удаление.
         items.add(SettingCell.Factory.of(1005, IconBackgroundColors.CYAN.top, IconBackgroundColors.CYAN.bottom, R.drawable.settings_logs, getString(R.string.ZaLogsTitle), "Просмотр и отправка логов"));
+        // ZaStoGram — копии аккаунтов, которые Telegram удалил или заморозил.
+        items.add(SettingCell.Factory.of(1010, IconBackgroundColors.RED.top, IconBackgroundColors.RED.bottom, R.drawable.settings_data, "Архив аккаунтов", ZaStoAccountArchive.hasUnseen() ? "Есть сохранённый аккаунт" : "Копии удалённых и замороженных аккаунтов"));
         items.add(UItem.asShadow(null));
         final boolean walletAbove = getConnectionsManager().getCurrentTime() - 1791538462 < 4 * 7 * 24 * 60 * 60;
         if (walletAbove && getMessagesController().config.walletAvailable.get()) {
@@ -845,6 +848,9 @@ public class SettingsActivity extends BaseFragment implements NotificationCenter
                 break;
             case 1004:
                 presentSettingFragment(new FreeProxySettingsActivity());
+                break;
+            case 1010:
+                presentSettingFragment(new ZaStoAccountArchiveActivity());
                 break;
             case 1005:
                 presentSettingFragment(new LogsActivity());
