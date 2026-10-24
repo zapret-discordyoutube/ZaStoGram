@@ -45,7 +45,7 @@
 	url = https://github.com/wasm-micro-runtime/wasm-micro-runtime.git
 [submodule "TMessagesProj/jni/tgcalls"]
 	path = TMessagesProj/jni/tgcalls
-	url = https://git.zapret.moe/zastogram/tgcalls.git
+	url = https://git2.zapret.moe/zastogram/tgcalls.git
 	branch = zastogram
 [submodule "TMessagesProj/jni/wallet-engine"]
 	path = TMessagesProj/jni/wallet-engine

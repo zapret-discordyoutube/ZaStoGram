@@ -19,9 +19,9 @@ Stable и dev используют разные package id, поэтому ус�
 
 ## Скачать
 
-- [Последний стабильный релиз](https://git.zapret.moe/zastogram/ZaStoGram/releases/latest)
-- [Все релизы и dev-сборки](https://git.zapret.moe/zastogram/ZaStoGram/releases)
-- [Исходный код](https://git.zapret.moe/zastogram/ZaStoGram)
+- [Последний стабильный релиз](https://git2.zapret.moe/zastogram/ZaStoGram/releases/latest)
+- [Все релизы и dev-сборки](https://git2.zapret.moe/zastogram/ZaStoGram/releases)
+- [Исходный код](https://git2.zapret.moe/zastogram/ZaStoGram)
 
 Выбирайте APK по архитектуре устройства:
 
@@ -296,7 +296,7 @@ Telegram запрещена релизным guard: без обоих secrets п
 `3.10.2.4988404`. Для быстрого повторного native-build рекомендуется `ccache`.
 
 ```sh
-git clone --recursive https://git.zapret.moe/zastogram/ZaStoGram.git
+git clone --recursive https://git2.zapret.moe/zastogram/ZaStoGram.git
 cd ZaStoGram
 git submodule update --init --recursive --depth=1
 ```
