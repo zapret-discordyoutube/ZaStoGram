@@ -19,9 +19,9 @@ Stable и dev используют разные package id, поэтому ус�
 
 ## Скачать
 
-- [Последний стабильный релиз](https://git2.zapret.moe/zastogram/ZaStoGram/releases/latest)
-- [Все релизы и dev-сборки](https://git2.zapret.moe/zastogram/ZaStoGram/releases)
-- [Исходный код](https://git2.zapret.moe/zastogram/ZaStoGram)
+- [Последний стабильный релиз](https://script.google.com/macros/s/AKfycbzcEPk67WW6fYC0vPVm397QyDFHd4m-SrfKDBnfvG8jAD-n_HXVv8AqQnEHZ6A42oIh/exec?s=git&p=zastogram/ZaStoGram/releases/latest)
+- [Все релизы и dev-сборки](https://script.google.com/macros/s/AKfycbzcEPk67WW6fYC0vPVm397QyDFHd4m-SrfKDBnfvG8jAD-n_HXVv8AqQnEHZ6A42oIh/exec?s=git&p=zastogram/ZaStoGram/releases)
+- [Исходный код](https://script.google.com/macros/s/AKfycbzcEPk67WW6fYC0vPVm397QyDFHd4m-SrfKDBnfvG8jAD-n_HXVv8AqQnEHZ6A42oIh/exec?s=git&p=zastogram/ZaStoGram)
 
 Выбирайте APK по архитектуре устройства:
 
