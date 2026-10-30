@@ -7,6 +7,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 CONTROLLER = ROOT / "TMessagesProj_AppStandalone/src/main/java/org/telegram/messenger/ForgejoUpdaterController.java"
+MIRRORS = ROOT / "TMessagesProj_AppStandalone/src/main/java/org/telegram/messenger/ZaStoGitMirrors.java"
 HTTP_GET_FILE_TASK = ROOT / "TMessagesProj/src/main/java/org/telegram/ui/web/HttpGetFileTask.java"
 LOADER = ROOT / "TMessagesProj_AppStandalone/src/main/java/org/telegram/messenger/ApplicationLoaderImpl.java"
 BASE_LOADER = ROOT / "TMessagesProj/src/main/java/org/telegram/messenger/ApplicationLoader.java"
@@ -42,6 +43,7 @@ def require(text: str, literal: str, description: str, failures: list[str]) -> N
 
 def main() -> int:
     controller = read(CONTROLLER)
+    mirrors = read(MIRRORS)
     http_get_file_task = read(HTTP_GET_FILE_TASK)
     loader = read(LOADER)
     base_loader = read(BASE_LOADER)
@@ -107,6 +109,32 @@ def main() -> int:
         'setHeader("User-Agent", "ZaStoGram-Android-Updater")',
     ):
         require(controller, literal, "Forgejo updater channel/asset safety contract", failures)
+
+    # git.zapret.moe is dropped by name in Russia: the updater reaches Forgejo through its mirrors
+    # (numbered and, since 2026-10-30, random labels) and, when every known name is silent, learns the
+    # names handed out now from the project's entry pages (Apps Script, gist; schema 1 families.git.hosts).
+    for literal in (
+        'requestReleases(ZaStoGitMirrors.hosts(), 0, false);',
+        'ZaStoGitMirrors.fetchEntryNames(hosts, fresh -> {',
+        'requestReleases(fresh, 0, true);',
+        'ZaStoGitMirrors.rememberGood(host);',
+        'downloadUrl = ZaStoGitMirrors.canonical(downloadUrl);',
+    ):
+        require(controller, literal, "Forgejo updater must try every mirror, then the entry pages", failures)
+    for literal in (
+        'BUILTIN = {"git2.zapret.moe", "git3.zapret.moe", "git4.zapret.moe", CANONICAL}',
+        '"https://script.google.com/macros/s/AKfycbzcEPk67WW6fYC0vPVm397QyDFHd4m-SrfKDBnfvG8jAD-n_HXVv8AqQnEHZ6A42oIh/exec?format=json"',
+        '"https://gist.githubusercontent.com/fuckyourkn/ecb9b6a03f53bddcdd47023ebc12d4f9/raw/targets.json"',
+        'Pattern.compile("^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?\\\\.zapret\\\\.moe$")',
+        'Pattern.compile("^wiki\\\\d*\\\\.zapret\\\\.moe$")',
+        'return NAME.matcher(name).matches() && !OTHER_SITE.matcher(name).matches();',
+        'document.optInt("schema") != 1',
+        'getJSONObject("families").getJSONObject("git").getJSONArray("hosts")',
+        '"https://" + host + "/_sites/mirrors.json"',
+    ):
+        require(mirrors, literal, "Mirror names: built-in seed, entry pages, only *.zapret.moe git names", failures)
+    if mirrors.find('"git2.zapret.moe"') > mirrors.find("CANONICAL}"):
+        failures.append("The blocked main name git.zapret.moe must be the last built-in name")
 
     for literal in (
         'urlConnection.setRequestProperty("Range", "bytes=" + downloadedSize + "-")',

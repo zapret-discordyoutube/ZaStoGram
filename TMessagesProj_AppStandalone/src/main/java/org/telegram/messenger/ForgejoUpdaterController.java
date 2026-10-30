@@ -15,6 +15,7 @@ import org.telegram.ui.web.HttpGetTask;
 
 import java.io.File;
 import java.util.ArrayList;
+import java.util.List;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -66,6 +67,8 @@ public final class ForgejoUpdaterController {
     private boolean downloading;
     private float downloadingProgress;
     private HttpGetFileTask downloadingTask;
+    private List<String> downloadHosts = new ArrayList<>();
+    private int downloadHostIndex;
 
     private ForgejoUpdaterController() {
         load();
@@ -218,14 +221,25 @@ public final class ForgejoUpdaterController {
             return;
         }
 
-        final String url = getReleasesUrl();
         FileLog.d("zasto_update check_start channel=" + getChannel()
                 + " installed=" + getInstalledReleaseTag()
                 + " force=" + force
-                + " url=" + url);
+                + " url=" + getReleasesUrl());
         checkingForUpdate = true;
+        requestReleases(ZaStoGitMirrors.hosts(), 0, false);
+    }
+
+    /**
+     * Asks the hosts one by one: git.zapret.moe is dropped by name in some countries, its mirrors are not.
+     * When every known host is silent, the names handed out now are read once from the entry pages.
+     */
+    private void requestReleases(List<String> hosts, int index, boolean fromEntry) {
+        final String host = hosts.get(index);
+        final String url = ZaStoGitMirrors.withHost(getReleasesUrl(), host);
         new HttpGetTask(result -> AndroidUtilities.runOnUIThread(() -> {
             boolean changed = false;
+            boolean tryNext = false;
+            boolean tryEntry = false;
             try {
                 if (result == null) {
                     throw new IllegalStateException("Forgejo returned no response");
@@ -238,19 +252,38 @@ public final class ForgejoUpdaterController {
                         + " installed=" + getInstalledReleaseTag()
                         + " candidate=" + (candidate == null ? "none" : candidate.releaseTag)
                         + " pending=" + releaseTag
-                        + " changed=" + changed);
+                        + " changed=" + changed
+                        + " host=" + host);
                 lastCheck = System.currentTimeMillis();
                 save();
+                ZaStoGitMirrors.rememberGood(host);
             } catch (Exception e) {
                 FileLog.e("Failed to check ZaStoGram updates at " + url, e);
+                tryNext = index + 1 < hosts.size();
+                tryEntry = !tryNext && !fromEntry;
             } finally {
-                checkingForUpdate = false;
-                finishCheck(changed);
-                scheduleNextCheck();
+                if (tryNext) {
+                    requestReleases(hosts, index + 1, fromEntry);
+                } else if (tryEntry) {
+                    ZaStoGitMirrors.fetchEntryNames(hosts, fresh -> {
+                        if (fresh.isEmpty()) {
+                            checkingForUpdate = false;
+                            finishCheck(false);
+                            scheduleNextCheck();
+                        } else {
+                            requestReleases(fresh, 0, true);
+                        }
+                    });
+                } else {
+                    checkingForUpdate = false;
+                    finishCheck(changed);
+                    scheduleNextCheck();
+                }
             }
         }))
                 .setHeader("Accept", "application/json")
                 .setHeader("User-Agent", "ZaStoGram-Android-Updater")
+                .setTimeouts(ZaStoGitMirrors.CONNECT_TIMEOUT_MS, ZaStoGitMirrors.READ_TIMEOUT_MS)
                 .execute(url);
     }
 
@@ -306,6 +339,8 @@ public final class ForgejoUpdaterController {
         String downloadUrl = asset.optString("browser_download_url", "");
         long assetId = asset.optLong("id", 0L);
         long size = asset.optLong("size", 0L);
+        // Mirrors answer with their own host; the stored URL stays the same whichever one replied.
+        downloadUrl = ZaStoGitMirrors.canonical(downloadUrl);
         if (!downloadUrl.startsWith("https://") || assetId == 0L || size <= 0L || size > MAX_APK_BYTES) {
             return null;
         }
@@ -635,6 +670,8 @@ public final class ForgejoUpdaterController {
     }
 
     public void downloadUpdate() {
+        downloadHosts = ZaStoGitMirrors.hosts();
+        downloadHostIndex = 0;
         downloadUpdate(false);
     }
 
@@ -700,8 +737,13 @@ public final class ForgejoUpdaterController {
                 .setDestFile(partialFile)
                 .setResumeExistingFile(true)
                 .setKeepPartialFileOnCancel(true)
+                .setTimeouts(ZaStoGitMirrors.CONNECT_TIMEOUT_MS, 20000)
                 .setMaxSize(Math.min(MAX_APK_BYTES, assetSize));
-        downloadingTask.execute(fileUrl);
+        if (downloadHosts.isEmpty()) {
+            downloadHosts = ZaStoGitMirrors.hosts();
+            downloadHostIndex = 0;
+        }
+        downloadingTask.execute(ZaStoGitMirrors.withHost(fileUrl, downloadHosts.get(downloadHostIndex)));
     }
 
     private void onDownloadFinished(File downloadedFile, long requestedReleaseId, long requestedAssetId) {
@@ -716,6 +758,9 @@ public final class ForgejoUpdaterController {
         if (downloadedFile != null && isDownloadedApkValid(downloadedFile)) {
             File finalizedFile = finalizeDownloadedApk(downloadedFile);
             if (finalizedFile != null) {
+                if (downloadHostIndex < downloadHosts.size()) {
+                    ZaStoGitMirrors.rememberGood(downloadHosts.get(downloadHostIndex));
+                }
                 path = finalizedFile.getAbsolutePath();
                 downloadingProgress = 1.0f;
                 save();
@@ -726,6 +771,9 @@ public final class ForgejoUpdaterController {
                 && assetSize > 0L && downloadedFile.length() < assetSize) {
             // Some HTTP stacks report a clean EOF instead of throwing when the
             // connection disappears. This is still a resumable partial file.
+            if (continueOnNextMirror()) {
+                return;
+            }
             downloadingProgress = getCachedDownloadProgress();
             FileLog.d("Forgejo update download paused at " + (int) (downloadingProgress * 100) + "%");
         } else if (downloadedFile != null) {
@@ -735,6 +783,9 @@ public final class ForgejoUpdaterController {
         } else {
             // Network failures leave the deterministic .part file in cache. A
             // later attempt, including after app restart, resumes that file.
+            if (continueOnNextMirror()) {
+                return;
+            }
             downloadingProgress = getCachedDownloadProgress();
             if (downloadingProgress > 0.0f) {
                 FileLog.d("Forgejo update download paused at " + (int) (downloadingProgress * 100) + "%");
@@ -743,6 +794,17 @@ public final class ForgejoUpdaterController {
             }
         }
         NotificationCenter.getGlobalInstance().postNotificationName(NotificationCenter.appUpdateAvailable);
+    }
+
+    /** The partial file is the same on every mirror, so the next one simply resumes it. */
+    private boolean continueOnNextMirror() {
+        if (downloadHostIndex + 1 >= downloadHosts.size()) {
+            return false;
+        }
+        downloadHostIndex++;
+        FileLog.d("zasto_update download_next_mirror host=" + downloadHosts.get(downloadHostIndex));
+        downloadUpdate(true);
+        return true;
     }
 
     private boolean isDownloadedApkValid(File file) {

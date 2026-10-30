@@ -48,6 +48,8 @@ public class HttpGetFileTask extends AsyncTask<String, Void, File> {
 
     private Exception exception;
     private long max_size = -1;
+    private int connectTimeout;
+    private int readTimeout;
 
     public HttpGetFileTask(
         Utilities.Callback<File> doneCallback,
@@ -86,6 +88,14 @@ public class HttpGetFileTask extends AsyncTask<String, Void, File> {
         return this;
     }
 
+    /** Zero keeps the platform default. */
+    @Keep
+    public HttpGetFileTask setTimeouts(int connectMs, int readMs) {
+        this.connectTimeout = connectMs;
+        this.readTimeout = readMs;
+        return this;
+    }
+
     @Keep
     public HttpGetFileTask setMaxSize(long max_size) {
         this.max_size = max_size;
@@ -112,6 +122,12 @@ public class HttpGetFileTask extends AsyncTask<String, Void, File> {
                 URL url = new URL(urlString);
                 urlConnection = (HttpURLConnection) url.openConnection();
                 urlConnection.setRequestMethod("GET");
+                if (connectTimeout > 0) {
+                    urlConnection.setConnectTimeout(connectTimeout);
+                }
+                if (readTimeout > 0) {
+                    urlConnection.setReadTimeout(readTimeout);
+                }
                 if (resuming) {
                     urlConnection.setRequestProperty("Range", "bytes=" + downloadedSize + "-");
                 }

@@ -17,6 +17,8 @@ public class HttpGetTask extends AsyncTask<String, Void, String> {
     private final HashMap<String, String> headers = new HashMap<>();
     private final Utilities.Callback<String> callback;
     private Exception exception;
+    private int connectTimeout;
+    private int readTimeout;
 
     public HttpGetTask(Utilities.Callback<String> callback) {
         this.callback = callback;
@@ -24,6 +26,13 @@ public class HttpGetTask extends AsyncTask<String, Void, String> {
 
     public HttpGetTask setHeader(String key, String value) {
         headers.put(key, value);
+        return this;
+    }
+
+    /** Zero keeps the platform default. */
+    public HttpGetTask setTimeouts(int connectMs, int readMs) {
+        this.connectTimeout = connectMs;
+        this.readTimeout = readMs;
         return this;
     }
 
@@ -40,6 +49,12 @@ public class HttpGetTask extends AsyncTask<String, Void, String> {
             }
             urlConnection.setRequestMethod("GET");
             urlConnection.setDoInput(true);
+            if (connectTimeout > 0) {
+                urlConnection.setConnectTimeout(connectTimeout);
+            }
+            if (readTimeout > 0) {
+                urlConnection.setReadTimeout(readTimeout);
+            }
 
             int statusCode = urlConnection.getResponseCode();
             BufferedReader in;
