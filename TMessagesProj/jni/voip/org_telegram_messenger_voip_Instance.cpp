@@ -824,6 +824,20 @@ JNIEXPORT void JNICALL Java_org_telegram_messenger_voip_NativeInstance_setVideoE
     broadcastRequestedSinks(instance);
 }
 
+// IPv4 first, then the same server over IPv6 when the connection has one, as iOS
+// does. Both entries keep the same id: it travels on the wire as
+// reflector-<id>-<tag>.reflector and the peer matches on it.
+static void pushRtcServerWithIpv6(std::vector<RtcServer> &rtcServers, RtcServer &&rtcServer, std::string const &ipv6) {
+    if (ipv6.empty()) {
+        rtcServers.push_back(std::move(rtcServer));
+        return;
+    }
+    RtcServer rtcServerV6 = rtcServer;
+    rtcServerV6.host = ipv6;
+    rtcServers.push_back(std::move(rtcServer));
+    rtcServers.push_back(std::move(rtcServerV6));
+}
+
 extern "C"
 JNIEXPORT jlong JNICALL Java_org_telegram_messenger_voip_NativeInstance_makeNativeInstance(
     JNIEnv *env, jclass clazz,
@@ -951,6 +965,7 @@ JNIEXPORT jlong JNICALL Java_org_telegram_messenger_voip_NativeInstance_makeNati
             rtcServer.login = tgvoip::jni::JavaStringToStdString(env, endpointObject.getStringField("username"));
             rtcServer.password = tgvoip::jni::JavaStringToStdString(env, endpointObject.getStringField("password"));
             rtcServer.isTurn = endpointObject.getBooleanField("turn");
+            const std::string turnIpv6 = tgvoip::jni::JavaStringToStdString(env, endpointObject.getStringField("ipv6"));
             if (relayTcpTls && rtcServer.isTurn) {
                 // Тот же TURN, но по TCP и по TLS. Сервер отдаёт его как UDP, и там,
                 // где UDP режут целиком, звонок не поднимается вовсе. Кандидаты
@@ -958,14 +973,14 @@ JNIEXPORT jlong JNICALL Java_org_telegram_messenger_voip_NativeInstance_makeNati
                 // берёт их только когда UDP не заработал.
                 RtcServer tcpServer = rtcServer;
                 tcpServer.isTcp = true;
-                descriptor.rtcServers.push_back(std::move(tcpServer));
+                pushRtcServerWithIpv6(descriptor.rtcServers, std::move(tcpServer), turnIpv6);
 
                 RtcServer tlsServer = rtcServer;
                 tlsServer.isTcp = true;
                 tlsServer.isTls = true;
-                descriptor.rtcServers.push_back(std::move(tlsServer));
+                pushRtcServerWithIpv6(descriptor.rtcServers, std::move(tlsServer), turnIpv6);
             }
-            descriptor.rtcServers.push_back(std::move(rtcServer));
+            pushRtcServerWithIpv6(descriptor.rtcServers, std::move(rtcServer), turnIpv6);
         } else {
             RtcServer rtcServer;
             rtcServer.id = static_cast<uint8_t>(endpointObject.getIntField("reflectorId"));
@@ -975,6 +990,7 @@ JNIEXPORT jlong JNICALL Java_org_telegram_messenger_voip_NativeInstance_makeNati
             rtcServer.password = tgvoip::jni::JavaStringToStdString(env, endpointObject.getStringField("password"));
             rtcServer.isTurn = true;
             rtcServer.isTcp = endpointObject.getBooleanField("tcp");
+            const std::string reflectorIpv6 = tgvoip::jni::JavaStringToStdString(env, endpointObject.getStringField("ipv6"));
             if (!rtcServer.isTcp) {
                 // Тот же рефлектор, но запасным путём — по TCP. Сервер отдаёт
                 // рефлекторы как UDP, и там, где UDP режут, звонок не поднимается
@@ -982,9 +998,9 @@ JNIEXPORT jlong JNICALL Java_org_telegram_messenger_voip_NativeInstance_makeNati
                 // ICE берёт его только когда UDP не заработал.
                 RtcServer tcpServer = rtcServer;
                 tcpServer.isTcp = true;
-                descriptor.rtcServers.push_back(std::move(tcpServer));
+                pushRtcServerWithIpv6(descriptor.rtcServers, std::move(tcpServer), reflectorIpv6);
             }
-            descriptor.rtcServers.push_back(std::move(rtcServer));
+            pushRtcServerWithIpv6(descriptor.rtcServers, std::move(rtcServer), reflectorIpv6);
 
             Endpoint endpoint;
             endpoint.endpointId = endpointObject.getLongField("id");

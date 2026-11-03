@@ -250,7 +250,7 @@ android {
         externalNativeBuild {
             cmake {
                 version '3.22.1'
-                def cmakeArgs = ['-DANDROID_STL=c++_static', '-DANDROID_PLATFORM=android-21'] //, '-DANDROID_SUPPORT_FLEXIBLE_PAGE_SIZES=ON'
+                def cmakeArgs = ['-DANDROID_STL=c++_static', '-DANDROID_PLATFORM=android-23'] //, '-DANDROID_SUPPORT_FLEXIBLE_PAGE_SIZES=ON'
                 // Route NDK compiles through ccache when the caller has configured a persistent
                 // cache. This is used by both Forgejo Actions and local release scripts.
                 if (System.getenv('USE_CCACHE') == '1') {
