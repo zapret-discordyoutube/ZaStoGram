@@ -876,11 +876,145 @@ public class MessagesController extends BaseController implements NotificationCe
         getStoriesController().onPremiumChanged();
     }
 
+    /**
+     * ZaStoGram's own folders (ZsgFolders) live in dialogFilters next to Telegram's, with ids
+     * above ZsgFolders.ID_BASE. This brings the list in line with the store.
+     */
+    public void applyLocalFolders() {
+        final ZsgFolders store = ZsgFolders.getInstance(currentAccount);
+        store.load();
+        final ArrayList<ZsgFolders.Folder> wanted = store.list();
+        final HashSet<Integer> wantedIds = new HashSet<>();
+        for (int i = 0; i < wanted.size(); i++) {
+            wantedIds.add(wanted.get(i).id);
+        }
+        for (int i = dialogFilters.size() - 1; i >= 0; i--) {
+            final DialogFilter filter = dialogFilters.get(i);
+            if (ZsgFolders.isLocalId(filter.id) && !wantedIds.contains(filter.id)) {
+                dialogFilters.remove(i);
+                dialogFiltersById.remove(filter.id);
+                for (int a = 0; a < selectedDialogFilter.length; a++) {
+                    if (selectedDialogFilter[a] == filter) {
+                        selectedDialogFilter[a] = null;
+                    }
+                }
+            }
+        }
+        for (int i = 0; i < wanted.size(); i++) {
+            final ZsgFolders.Folder folder = wanted.get(i);
+            DialogFilter filter = dialogFiltersById.get(folder.id);
+            if (filter == null) {
+                filter = new DialogFilter();
+                filter.id = folder.id;
+                filter.color = -1;
+                dialogFilters.add(filter);
+                dialogFiltersById.put(filter.id, filter);
+            }
+            // Nested folders are shown as tabs with their whole path.
+            filter.name = store.isNested(folder.id) ? store.pathTitle(folder.id) : folder.title;
+            filter.flags = 0;
+            filter.order = 1000 + i;
+            filter.locked = false;
+            final ArrayList<Long> always = new ArrayList<>();
+            for (String key : store.peersOf(folder.id)) {
+                final long dialogId = ZsgFolders.dialogIdOf(key);
+                if (dialogId != 0) {
+                    always.add(dialogId);
+                }
+            }
+            filter.alwaysShow = always;
+            filter.neverShow = new ArrayList<>();
+            final LongSparseIntArray pinned = new LongSparseIntArray();
+            final ArrayList<Long> pins = store.pinnedOf(folder.id);
+            for (int j = 0; j < pins.size(); j++) {
+                if (always.contains(pins.get(j))) {
+                    pinned.put(pins.get(j), j + 1);
+                }
+            }
+            filter.pinnedDialogs = pinned;
+        }
+        // Telegram's folders first, ours after them.
+        Collections.sort(dialogFilters, (a, b) -> {
+            final boolean localA = ZsgFolders.isLocalId(a.id);
+            final boolean localB = ZsgFolders.isLocalId(b.id);
+            if (localA != localB) {
+                return localA ? 1 : -1;
+            }
+            return Integer.compare(a.order, b.order);
+        });
+        getMessagesStorage().saveDialogFiltersOrder();
+        getNotificationCenter().postNotificationName(NotificationCenter.dialogFiltersUpdated);
+        for (int a = 0; a < selectedDialogFilter.length; a++) {
+            if (selectedDialogFilter[a] != null && ZsgFolders.isLocalId(selectedDialogFilter[a].id)) {
+                onFilterUpdate(selectedDialogFilter[a]);
+            }
+        }
+    }
+
+    /**
+     * A change of a ZaStoGram folder made through the ordinary folder UI (saveFilterToServer):
+     * the chats are compared with the store, because the UI edits the lists in place first.
+     */
+    public void saveLocalFolder(DialogFilter filter, String newName, ArrayList<Long> newAlwaysShow, LongSparseIntArray newPinned) {
+        final ZsgFolders store = ZsgFolders.getInstance(currentAccount);
+        if (store.find(filter.id) == null) {
+            return;
+        }
+        final java.util.LinkedHashSet<Long> desired = new java.util.LinkedHashSet<>(newAlwaysShow);
+        final ArrayList<Long> pins = new ArrayList<>();
+        for (int a = 0; a < newPinned.size(); a++) {
+            final long key = newPinned.keyAt(a);
+            if (!DialogObject.isEncryptedDialog(key)) {
+                pins.add(key);
+                desired.add(key);
+            }
+        }
+        Collections.sort(pins, (o1, o2) -> Integer.compare(newPinned.get(o1), newPinned.get(o2)));
+        final HashSet<Long> current = new HashSet<>();
+        for (String key : store.peersOf(filter.id)) {
+            current.add(ZsgFolders.dialogIdOf(key));
+        }
+        for (Long dialogId : current) {
+            if (!desired.contains(dialogId)) {
+                store.removeChatDeep(filter.id, dialogId);
+            }
+        }
+        for (Long dialogId : desired) {
+            if (!current.contains(dialogId) && !DialogObject.isEncryptedDialog(dialogId)) {
+                store.addChat(filter.id, dialogId);
+            }
+        }
+        store.setPinned(filter.id, pins);
+        if (newName != null && !newName.trim().isEmpty() && !newName.equals(filter.name)) {
+            store.rename(filter.id, newName);
+        }
+    }
+
+    /** Keeps the order of ZaStoGram's top-level folders after the user reordered the tabs. */
+    public void saveLocalFoldersOrder() {
+        final ArrayList<Integer> ids = new ArrayList<>();
+        for (int i = 0; i < dialogFilters.size(); i++) {
+            if (ZsgFolders.isLocalId(dialogFilters.get(i).id)) {
+                ids.add(dialogFilters.get(i).id);
+            }
+        }
+        if (!ids.isEmpty()) {
+            ZsgFolders.getInstance(currentAccount).reorderTop(ids);
+        }
+    }
+
     public void lockFiltersInternal() {
         boolean changed = false;
-        if (!getUserConfig().isPremium() && dialogFilters.size() - 1 > dialogFiltersLimitDefault) {
-            int n = dialogFilters.size() - 1 - dialogFiltersLimitDefault;
-            ArrayList<DialogFilter> filtersSortedById = new ArrayList<>(dialogFilters);
+        // ZaStoGram's own folders are not limited by Telegram's folder limit.
+        final ArrayList<DialogFilter> serverFilters = new ArrayList<>();
+        for (int i = 0; i < dialogFilters.size(); i++) {
+            if (!ZsgFolders.isLocalId(dialogFilters.get(i).id)) {
+                serverFilters.add(dialogFilters.get(i));
+            }
+        }
+        if (!getUserConfig().isPremium() && serverFilters.size() - 1 > dialogFiltersLimitDefault) {
+            int n = serverFilters.size() - 1 - dialogFiltersLimitDefault;
+            ArrayList<DialogFilter> filtersSortedById = new ArrayList<>(serverFilters);
             Collections.reverse(filtersSortedById);
             for (int i = 0; i < filtersSortedById.size(); i++) {
                 if (i < n) {
@@ -2244,6 +2378,8 @@ public class MessagesController extends BaseController implements NotificationCe
                     putUsers(users, true);
                     putChats(chats, true);
                     dialogFiltersLoaded = true;
+                    applyLocalFolders();
+                    ZsgFoldersSync.getInstance(currentAccount).start();
                     getNotificationCenter().postNotificationName(NotificationCenter.dialogFiltersUpdated);
                     if (remote == 0) {
                         loadRemoteFilters(false);

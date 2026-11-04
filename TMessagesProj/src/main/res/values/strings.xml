@@ -11854,4 +11854,18 @@
     <string name="NoPaidMessagesTokenUsed">un1 used your QR code and can message you for free</string>
     <string name="NoPaidMessagesTokenUsedOut">You used the QR code of un1 and can message them for free</string>
     <string name="NoPaidMessagesTokenImported">You can now message **%1$s** for free.</string>
+    <string name="ZsgFoldersCreate">New ZaStoGram folder</string>
+    <string name="ZsgFoldersNew">New folder</string>
+    <string name="ZsgFoldersName">Folder name</string>
+    <string name="ZsgFoldersSettings">ZaStoGram folder settings</string>
+    <string name="ZsgFoldersRename">Rename</string>
+    <string name="ZsgFoldersSubfolder">New subfolder</string>
+    <string name="ZsgFoldersParent">Parent folder</string>
+    <string name="ZsgFoldersTopLevel">Top level</string>
+    <string name="ZsgFoldersMoveUp">Move up</string>
+    <string name="ZsgFoldersMoveDown">Move down</string>
+    <string name="ZsgFoldersSyncOn">Synchronization is on (tap to keep this folder on this device only)</string>
+    <string name="ZsgFoldersSyncOff">This folder stays on this device (tap to synchronize it)</string>
+    <string name="ZsgFoldersSyncTooLarge">ZaStoGram folders are too large to synchronize (%1$d KB, the limit is %2$d KB). Turn off synchronization for some folders.</string>
+    <string name="ZsgFoldersSyncFlood">Telegram limits how often ZaStoGram folders can be saved. Synchronization will continue in %1$d s.</string>
 </resources>

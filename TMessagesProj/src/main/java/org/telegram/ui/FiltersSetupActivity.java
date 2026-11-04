@@ -568,7 +568,7 @@ public class FiltersSetupActivity extends BaseFragment implements NotificationCe
         ArrayList<TLRPC.TL_dialogFilterSuggested> suggestedFilters = getMessagesController().suggestedFilters;
         ArrayList<MessagesController.DialogFilter> dialogFilters = getMessagesController().getDialogFilters();
         items.add(ItemInner.asHint());
-        if (!suggestedFilters.isEmpty() && dialogFilters.size() < 10) {
+        if (!suggestedFilters.isEmpty() && serverFiltersCount(dialogFilters) < 10) {
             int start = items.size();
             items.add(ItemInner.asHeader(LocaleController.getString(R.string.FilterRecommended)));
             for (int i = 0; i < suggestedFilters.size(); ++i) {
@@ -589,13 +589,14 @@ public class FiltersSetupActivity extends BaseFragment implements NotificationCe
             }
             filtersSectionEnd = items.size();
 
-            if (listView != null) listView.forcedSections.add(AndroidUtilities.pack(filtersSectionStart, filtersSectionEnd - 1 + (dialogFilters.size() < getMessagesController().dialogFiltersLimitPremium ? 1 : 0)));
+            if (listView != null) listView.forcedSections.add(AndroidUtilities.pack(filtersSectionStart, filtersSectionEnd - 1 + (serverFiltersCount(dialogFilters) < getMessagesController().dialogFiltersLimitPremium ? 1 : 0)));
         } else {
             filtersSectionStart = filtersSectionEnd = -1;
         }
-        if (dialogFilters.size() < getMessagesController().dialogFiltersLimitPremium) {
+        if (serverFiltersCount(dialogFilters) < getMessagesController().dialogFiltersLimitPremium) {
             items.add(ItemInner.asButton(LocaleController.getString(R.string.CreateNewFilter)));
         }
+        items.add(ItemInner.asButton(LocaleController.getString(R.string.ZsgFoldersCreate)));
         items.add(ItemInner.asShadow(null));
         items.add(ItemInner.asCheck(LocaleController.getString(R.string.ZaHideAllChats), CHECK_TYPE_HIDE_ALL_CHATS));
         items.add(ItemInner.asShadow(LocaleController.getString(R.string.ZaHideAllChatsInfo)));
@@ -626,8 +627,11 @@ public class FiltersSetupActivity extends BaseFragment implements NotificationCe
             ArrayList<MessagesController.DialogFilter> filters = getMessagesController().getDialogFilters();
             for (int a = 0, N = filters.size(); a < N; a++) {
                 MessagesController.DialogFilter filter = filters.get(a);
-                req.order.add(filter.id);
+                if (!org.telegram.messenger.ZsgFolders.isLocalId(filter.id)) {
+                    req.order.add(filter.id);
+                }
             }
+            getMessagesController().saveLocalFoldersOrder();
             getConnectionsManager().sendRequest(req, (response, error) -> {
 
             });
@@ -725,7 +729,11 @@ public class FiltersSetupActivity extends BaseFragment implements NotificationCe
                     presentFragment(new FilterCreateActivity(filter));
                 }
             } else if (item.viewType == VIEW_TYPE_BUTTON) {
-                createFolder(getParentLayout());
+                if (TextUtils.equals(item.text, LocaleController.getString(R.string.ZsgFoldersCreate))) {
+                    ZsgFoldersUi.showCreate(this, 0);
+                } else {
+                    createFolder(getParentLayout());
+                }
             }
         });
 
@@ -741,8 +749,19 @@ public class FiltersSetupActivity extends BaseFragment implements NotificationCe
         return fragmentView;
     }
 
+    // ZaStoGram's own folders are not limited by Telegram's folder limit.
+    private static int serverFiltersCount(ArrayList<MessagesController.DialogFilter> filters) {
+        int count = 0;
+        for (int i = 0; i < filters.size(); i++) {
+            if (!org.telegram.messenger.ZsgFolders.isLocalId(filters.get(i).id)) {
+                count++;
+            }
+        }
+        return count;
+    }
+
     public void createFolder(INavigationLayout navigationLayout) {
-        final int count = getMessagesController().getDialogFilters().size();
+        final int count = serverFiltersCount(getMessagesController().getDialogFilters());
         if (
             count - 1 >= getMessagesController().dialogFiltersLimitDefault && !getUserConfig().isPremium() ||
             count >= getMessagesController().dialogFiltersLimitPremium
@@ -936,6 +955,9 @@ public class FiltersSetupActivity extends BaseFragment implements NotificationCe
                                 presentFragment(new FilterCreateActivity(filter));
                             }
                         });
+                        if (org.telegram.messenger.ZsgFolders.isLocalId(filter.id)) {
+                            options.add(R.drawable.msg_edit, LocaleController.getString(R.string.ZsgFoldersSettings), () -> ZsgFoldersUi.showActions(FiltersSetupActivity.this, filter.id));
+                        }
                         options.add(R.drawable.msg_delete, LocaleController.getString(R.string.FilterDeleteItem), true, () -> {
                             if (filter.isChatlist()) {
                                 FolderBottomSheet.showForDeletion(FiltersSetupActivity.this, filter.id, success -> {
@@ -949,6 +971,10 @@ public class FiltersSetupActivity extends BaseFragment implements NotificationCe
                             builder.setMessage(LocaleController.getString(R.string.FilterDeleteAlert));
                             builder.setNegativeButton(LocaleController.getString(R.string.Cancel), null);
                             builder.setPositiveButton(LocaleController.getString(R.string.Delete), (dialog2, which2) -> {
+                                if (org.telegram.messenger.ZsgFolders.isLocalId(filter.id)) {
+                                    org.telegram.messenger.ZsgFolders.getInstance(currentAccount).remove(filter.id);
+                                    return;
+                                }
                                 AlertDialog progressDialog = null;
                                 if (getParentActivity() != null) {
                                     progressDialog = new AlertDialog(getParentActivity(), AlertDialog.ALERT_TYPE_SPINNER);

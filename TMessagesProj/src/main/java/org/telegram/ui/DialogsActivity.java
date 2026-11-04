@@ -3584,6 +3584,10 @@ public class DialogsActivity extends BaseFragment implements NotificationCenter.
                         builder.setMessage(LocaleController.getString(R.string.FilterDeleteAlert));
                         builder.setNegativeButton(LocaleController.getString(R.string.Cancel), null);
                         builder.setPositiveButton(LocaleController.getString(R.string.Delete), (dialog2, which2) -> {
+                            if (org.telegram.messenger.ZsgFolders.isLocalId(dialogFilter.id)) {
+                                org.telegram.messenger.ZsgFolders.getInstance(currentAccount).remove(dialogFilter.id);
+                                return;
+                            }
                             TLRPC.TL_messages_updateDialogFilter req = new TLRPC.TL_messages_updateDialogFilter();
                             req.id = dialogFilter.id;
                             getConnectionsManager().sendRequest(req, null);
@@ -9694,6 +9698,9 @@ public class DialogsActivity extends BaseFragment implements NotificationCenter.
                 filter.pinnedDialogs.put(selectedDialog, minPinnedNum);
             } else {
                 filter.pinnedDialogs.delete(selectedDialog);
+            }
+            if (org.telegram.messenger.ZsgFolders.isLocalId(filter.id)) {
+                getMessagesController().saveLocalFolder(filter, filter.name, filter.alwaysShow, filter.pinnedDialogs);
             }
 
             if (animated) {

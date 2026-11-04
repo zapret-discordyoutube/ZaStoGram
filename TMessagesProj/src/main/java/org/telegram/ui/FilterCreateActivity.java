@@ -805,6 +805,11 @@ public class FilterCreateActivity extends BaseFragment {
             builder.setMessage(LocaleController.getString(R.string.FilterDeleteAlert));
             builder.setNegativeButton(LocaleController.getString(R.string.Cancel), null);
             builder.setPositiveButton(LocaleController.getString(R.string.Delete), (dialog, which) -> {
+                if (org.telegram.messenger.ZsgFolders.isLocalId(filter.id)) {
+                    org.telegram.messenger.ZsgFolders.getInstance(currentAccount).remove(filter.id);
+                    finishFragment();
+                    return;
+                }
                 AlertDialog progressDialog = null;
                 if (getParentActivity() != null) {
                     progressDialog = new AlertDialog(getParentActivity(), AlertDialog.ALERT_TYPE_SPINNER);
@@ -1103,7 +1108,9 @@ public class FilterCreateActivity extends BaseFragment {
             TLRPC.TL_messages_updateDialogFiltersOrder req = new TLRPC.TL_messages_updateDialogFiltersOrder();
             ArrayList<MessagesController.DialogFilter> filters = fragment.getMessagesController().getDialogFilters();
             for (int a = 0, N = filters.size(); a < N; a++) {
-                req.order.add(filters.get(a).id);
+                if (!org.telegram.messenger.ZsgFolders.isLocalId(filters.get(a).id)) {
+                    req.order.add(filters.get(a).id);
+                }
             }
             fragment.getConnectionsManager().sendRequest(req, null);
         }
@@ -1114,6 +1121,14 @@ public class FilterCreateActivity extends BaseFragment {
 
     public static void saveFilterToServer(MessagesController.DialogFilter filter, int newFilterFlags, String newFilterName, ArrayList<TLRPC.MessageEntity> newFilterNameEntities, boolean newFilterNoanimate, int newFilterColor, ArrayList<Long> newAlwaysShow, ArrayList<Long> newNeverShow, LongSparseIntArray newPinned, boolean creatingNew, boolean atBegin, boolean hasUserChanged, boolean resetUnreadCounter, boolean progress, BaseFragment fragment, Runnable onFinish) {
         if (fragment == null || fragment.getParentActivity() == null) {
+            return;
+        }
+        if (org.telegram.messenger.ZsgFolders.isLocalId(filter.id)) {
+            // ZaStoGram's own folders are kept on the device (and synchronized through Saved Messages).
+            fragment.getMessagesController().saveLocalFolder(filter, newFilterName, newAlwaysShow, newPinned);
+            if (onFinish != null) {
+                onFinish.run();
+            }
             return;
         }
         AlertDialog progressDialog;

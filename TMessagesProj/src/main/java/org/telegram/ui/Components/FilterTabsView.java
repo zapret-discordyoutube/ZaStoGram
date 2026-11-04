@@ -1724,7 +1724,7 @@ public class FilterTabsView extends FrameLayout {
                 MessagesController.DialogFilter filter = filters.get(a);
                 if (filter.isDefault()) {
                     req.order.add(0);
-                } else {
+                } else if (!org.telegram.messenger.ZsgFolders.isLocalId(filter.id)) {
                     req.order.add(filter.id);
                 }
             }
