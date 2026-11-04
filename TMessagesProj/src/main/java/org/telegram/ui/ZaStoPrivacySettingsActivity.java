@@ -49,6 +49,13 @@ public class ZaStoPrivacySettingsActivity extends BaseFragment {
     private int zastogramPromoRow;
     private int videoNoRecompressRow;
     private int infoRow;
+    private int ghostHeaderRow;
+    private int ghostAllRow;
+    private int ghostReadRow;
+    private int ghostStoriesRow;
+    private int ghostOnlineRow;
+    private int ghostTypingRow;
+    private int ghostInfoRow;
     private int rowCount;
 
     @Override
@@ -66,6 +73,13 @@ public class ZaStoPrivacySettingsActivity extends BaseFragment {
         zastogramPromoRow = rowCount++;
         videoNoRecompressRow = rowCount++;
         infoRow = rowCount++;
+        ghostHeaderRow = rowCount++;
+        ghostAllRow = rowCount++;
+        ghostReadRow = rowCount++;
+        ghostStoriesRow = rowCount++;
+        ghostOnlineRow = rowCount++;
+        ghostTypingRow = rowCount++;
+        ghostInfoRow = rowCount++;
         return true;
     }
 
@@ -101,6 +115,15 @@ public class ZaStoPrivacySettingsActivity extends BaseFragment {
             if (!(view instanceof TextCheckCell)) {
                 return;
             }
+            if (position == ghostAllRow) {
+                boolean enable = !isGhostAllOn();
+                ZaStoPrivacy.set(ZaStoPrivacy.KEY_GHOST_NO_READ, enable);
+                ZaStoPrivacy.set(ZaStoPrivacy.KEY_GHOST_NO_STORIES, enable);
+                ZaStoPrivacy.set(ZaStoPrivacy.KEY_GHOST_NO_ONLINE, enable);
+                ZaStoPrivacy.set(ZaStoPrivacy.KEY_GHOST_NO_TYPING, enable);
+                listView.getAdapter().notifyItemRangeChanged(ghostAllRow, ghostTypingRow - ghostAllRow + 1);
+                return;
+            }
             String key = keyForRow(position);
             if (key == null) {
                 return;
@@ -108,6 +131,10 @@ public class ZaStoPrivacySettingsActivity extends BaseFragment {
             boolean newValue = !ZaStoPrivacy.get(key);
             ZaStoPrivacy.set(key, newValue);
             ((TextCheckCell) view).setChecked(newValue);
+            if (position >= ghostReadRow && position <= ghostTypingRow) {
+                // The "all at once" switch follows the four below it.
+                listView.getAdapter().notifyItemChanged(ghostAllRow);
+            }
             if (position == zastogramPromoRow) {
                 for (int a = 0; a < UserConfig.MAX_ACCOUNT_COUNT; a++) {
                     if (UserConfig.getInstance(a).isClientActivated()) {
@@ -141,7 +168,18 @@ public class ZaStoPrivacySettingsActivity extends BaseFragment {
         showDialog(builder.create());
     }
 
+    private static boolean isGhostAllOn() {
+        return ZaStoPrivacy.GHOST_NO_READ
+                && ZaStoPrivacy.GHOST_NO_STORIES
+                && ZaStoPrivacy.GHOST_NO_ONLINE
+                && ZaStoPrivacy.GHOST_NO_TYPING;
+    }
+
     private String keyForRow(int position) {
+        if (position == ghostReadRow) return ZaStoPrivacy.KEY_GHOST_NO_READ;
+        if (position == ghostStoriesRow) return ZaStoPrivacy.KEY_GHOST_NO_STORIES;
+        if (position == ghostOnlineRow) return ZaStoPrivacy.KEY_GHOST_NO_ONLINE;
+        if (position == ghostTypingRow) return ZaStoPrivacy.KEY_GHOST_NO_TYPING;
         if (position == keepDeletedRow) return ZaStoPrivacy.KEY_KEEP_DELETED;
         if (position == keepEphemeralRow) return ZaStoPrivacy.KEY_KEEP_EPHEMERAL;
         if (position == keepEditHistoryRow) return ZaStoPrivacy.KEY_KEEP_EDIT_HISTORY;
@@ -154,6 +192,11 @@ public class ZaStoPrivacySettingsActivity extends BaseFragment {
     }
 
     private String labelForRow(int position) {
+        if (position == ghostAllRow) return "Всё сразу";
+        if (position == ghostReadRow) return "Не отмечать сообщения прочитанными";
+        if (position == ghostStoriesRow) return "Не отмечать истории просмотренными";
+        if (position == ghostOnlineRow) return "Не отправлять онлайн-статус";
+        if (position == ghostTypingRow) return "Не отправлять «печатает»";
         if (position == keepDeletedRow) return "Сохранять удалённые сообщения";
         if (position == keepEphemeralRow) return "Сохранять самоуничтожающиеся (view-once)";
         if (position == keepEditHistoryRow) return "Хранить историю редактирования";
@@ -185,9 +228,9 @@ public class ZaStoPrivacySettingsActivity extends BaseFragment {
 
         @Override
         public int getItemViewType(int position) {
-            if (position == headerRow) {
+            if (position == headerRow || position == ghostHeaderRow) {
                 return VIEW_TYPE_HEADER;
-            } else if (position == infoRow) {
+            } else if (position == infoRow || position == ghostInfoRow) {
                 return VIEW_TYPE_INFO;
             } else if (position == videoNoRecompressRow) {
                 return VIEW_TYPE_VALUE;
@@ -218,9 +261,13 @@ public class ZaStoPrivacySettingsActivity extends BaseFragment {
         public void onBindViewHolder(RecyclerView.ViewHolder holder, int position) {
             switch (getItemViewType(position)) {
                 case VIEW_TYPE_HEADER:
-                    ((HeaderCell) holder.itemView).setText("Функции приватности ZaSto");
+                    ((HeaderCell) holder.itemView).setText(position == ghostHeaderRow ? "Режим призрака" : "Функции приватности ZaSto");
                     break;
                 case VIEW_TYPE_INFO:
+                    if (position == ghostInfoRow) {
+                        ((TextInfoPrivacyCell) holder.itemView).setText("Отметка о прочтении и просмотр историй не уходят на сервер: собеседник не увидит «прочитано», автор истории — ваш просмотр. У вас чат при этом выглядит прочитанным, а после перезапуска непрочитанное может вернуться. Если вы сами отправите сообщение, Telegram всё равно отметит чат прочитанным. Без онлайн-статуса приложение всегда остаётся офлайн.");
+                        break;
+                    }
                     ((TextInfoPrivacyCell) holder.itemView).setText("По умолчанию всё включено. Выключение тумблера отменяет соответствующую функцию ZaSto. Без закрепления канал ZaStoGram становится обычным чатом: его можно убрать в архив. Видео без пережатия уходит оригиналом, как с компьютера: быстрее, но больше по объёму; видео с обрезкой, рисованием или фильтрами пережимается всегда.");
                     break;
                 case VIEW_TYPE_VALUE:
@@ -230,7 +277,8 @@ public class ZaStoPrivacySettingsActivity extends BaseFragment {
                     TextCheckCell cell = (TextCheckCell) holder.itemView;
                     String key = keyForRow(position);
                     boolean last = false;
-                    cell.setTextAndCheck(labelForRow(position), key != null && ZaStoPrivacy.get(key), !last);
+                    boolean checked = position == ghostAllRow ? isGhostAllOn() : key != null && ZaStoPrivacy.get(key);
+                    cell.setTextAndCheck(labelForRow(position), checked, !last);
                     break;
             }
         }

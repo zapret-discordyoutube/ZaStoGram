@@ -44,6 +44,7 @@ public class ZsgFolders extends BaseController {
         public String parentUid = "";
         public String title = "";
         public String icon = "";
+        public String color = ""; // "#RRGGBB" or empty; set on the PC client, kept intact here.
         public int order;
         public boolean sync = true;
         public boolean deleted;
@@ -625,6 +626,7 @@ public class ZsgFolders extends BaseController {
         object.put("parent", folder.parentUid);
         object.put("title", folder.title);
         object.put("icon", folder.icon);
+        object.put("color", folder.color);
         object.put("order", folder.order);
         object.put("sync", folder.sync);
         object.put("deleted", folder.deleted);
@@ -641,6 +643,7 @@ public class ZsgFolders extends BaseController {
         folder.parentUid = object.optString("parent", "");
         folder.title = object.optString("title", "");
         folder.icon = object.optString("icon", "");
+        folder.color = object.optString("color", "");
         folder.order = object.optInt("order", 0);
         folder.sync = object.optBoolean("sync", true);
         folder.deleted = object.optBoolean("deleted", false);
@@ -811,6 +814,7 @@ public class ZsgFolders extends BaseController {
                     folder.parentUid = incoming.parentUid;
                     folder.title = incoming.title;
                     folder.icon = incoming.icon;
+                    folder.color = incoming.color;
                     folder.order = incoming.order;
                     folder.own = incoming.own;
                     folder.pinned = incoming.pinned;

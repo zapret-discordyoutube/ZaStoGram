@@ -71,10 +71,17 @@ public class ZsgFoldersSync extends BaseController {
     private int incompleteRetries;
     private int notifiedTooLargeKb;
     private final Runnable syncRunnable = this::sync;
+    private boolean missedPoll;
     private final Runnable pollRunnable = new Runnable() {
         @Override
         public void run() {
-            sync();
+            if (ApplicationLoader.mainInterfacePaused) {
+                // In the background a periodic request would wake the radio every 15 minutes
+                // for nothing: nobody looks at the folders. Catch up when the app comes back.
+                missedPoll = true;
+            } else {
+                sync();
+            }
             AndroidUtilities.runOnUIThread(this, POLL_EVERY);
         }
     };
@@ -93,6 +100,14 @@ public class ZsgFoldersSync extends BaseController {
         getMessagesController().applyLocalFolders();
         schedule(START_DELAY);
         AndroidUtilities.runOnUIThread(pollRunnable, POLL_EVERY);
+    }
+
+    /** Called when the app returns to the foreground: runs the poll that was skipped in the background. */
+    public void onAppForeground() {
+        if (started && missedPoll) {
+            missedPoll = false;
+            schedule(START_DELAY / 4);
+        }
     }
 
     public void onFoldersChanged() {

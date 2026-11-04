@@ -911,7 +911,8 @@ public class MessagesController extends BaseController implements NotificationCe
                 dialogFiltersById.put(filter.id, filter);
             }
             // Nested folders are shown as tabs with their whole path.
-            filter.name = store.isNested(folder.id) ? store.pathTitle(folder.id) : folder.title;
+            final String plainTitle = store.isNested(folder.id) ? store.pathTitle(folder.id) : folder.title;
+            filter.name = folder.icon == null || folder.icon.isEmpty() ? plainTitle : folder.icon + " " + plainTitle;
             filter.flags = 0;
             filter.order = 1000 + i;
             filter.locked = false;
@@ -10674,7 +10675,8 @@ public class MessagesController extends BaseController implements NotificationCe
     }
 
     private boolean canSendOnlinePresence() {
-        return currentAccount == UserConfig.selectedAccount;
+        // ZaStoGram: ghost mode never sends the online status.
+        return currentAccount == UserConfig.selectedAccount && !ZaStoPrivacy.GHOST_NO_ONLINE;
     }
 
     public void updateTimerProc() {
@@ -11564,6 +11566,10 @@ public class MessagesController extends BaseController implements NotificationCe
 
     public boolean sendTyping(long dialogId, long threadMsgId, int action, String emojicon, int classGuid) {
         if (action < 0 || action >= sendingTypings.length || dialogId == 0) {
+            return false;
+        }
+        if (ZaStoPrivacy.GHOST_NO_TYPING) {
+            // ZaStoGram: ghost mode, typing, recording and uploading actions are not sent.
             return false;
         }
         final long selfId = UserConfig.getInstance(UserConfig.selectedAccount).getClientUserId();
@@ -14774,6 +14780,10 @@ public class MessagesController extends BaseController implements NotificationCe
     }
 
     private void completeReadTask(ReadTask task) {
+        if (ZaStoPrivacy.GHOST_NO_READ) {
+            // ZaStoGram: ghost mode, the read mark is not sent. Locally the chat is already read.
+            return;
+        }
         if (task.replyId != 0 && task.monoForumPeerId == 0) {
             TLRPC.TL_messages_readDiscussion req = new TLRPC.TL_messages_readDiscussion();
             req.msg_id = (int) task.replyId;

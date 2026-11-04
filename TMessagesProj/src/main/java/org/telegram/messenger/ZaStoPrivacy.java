@@ -24,6 +24,10 @@ public final class ZaStoPrivacy {
     public static final String KEY_DISABLE_ADS = "DISABLE_ADS";
     public static final String KEY_HIDE_ALL_CHATS = "HIDE_ALL_CHATS";
     public static final String KEY_SHOW_ZASTOGRAM_PROMO = "SHOW_ZASTOGRAM_PROMO";
+    public static final String KEY_GHOST_NO_READ = "GHOST_NO_READ";
+    public static final String KEY_GHOST_NO_STORIES = "GHOST_NO_STORIES";
+    public static final String KEY_GHOST_NO_ONLINE = "GHOST_NO_ONLINE";
+    public static final String KEY_GHOST_NO_TYPING = "GHOST_NO_TYPING";
 
     /** Keep messages that the remote side deletes (anti-delete), marked instead of removed. */
     public static boolean KEEP_DELETED = true;
@@ -52,6 +56,18 @@ public final class ZaStoPrivacy {
      */
     public static boolean SHOW_ZASTOGRAM_PROMO = true;
 
+    /** Ghost mode: do not tell the server that messages were read. The chat still looks read locally. */
+    public static boolean GHOST_NO_READ = false;
+
+    /** Ghost mode: do not tell the server that stories were viewed (read marks and view counters). */
+    public static boolean GHOST_NO_STORIES = false;
+
+    /** Ghost mode: never send the online status; the client always stays offline. */
+    public static boolean GHOST_NO_ONLINE = false;
+
+    /** Ghost mode: do not send "typing", recording and uploading actions. */
+    public static boolean GHOST_NO_TYPING = false;
+
     /** Hide the built-in "All Chats" tab when at least one custom chat folder exists. */
     public static boolean HIDE_ALL_CHATS = false;
 
@@ -76,6 +92,10 @@ public final class ZaStoPrivacy {
             DISABLE_ADS = p.getBoolean(KEY_DISABLE_ADS, true);
             HIDE_ALL_CHATS = p.getBoolean(KEY_HIDE_ALL_CHATS, false);
             SHOW_ZASTOGRAM_PROMO = p.getBoolean(KEY_SHOW_ZASTOGRAM_PROMO, true);
+            GHOST_NO_READ = p.getBoolean(KEY_GHOST_NO_READ, false);
+            GHOST_NO_STORIES = p.getBoolean(KEY_GHOST_NO_STORIES, false);
+            GHOST_NO_ONLINE = p.getBoolean(KEY_GHOST_NO_ONLINE, false);
+            GHOST_NO_TYPING = p.getBoolean(KEY_GHOST_NO_TYPING, false);
         } catch (Exception ignore) {
         }
     }
@@ -91,6 +111,10 @@ public final class ZaStoPrivacy {
             case KEY_DISABLE_ADS: return DISABLE_ADS;
             case KEY_HIDE_ALL_CHATS: return HIDE_ALL_CHATS;
             case KEY_SHOW_ZASTOGRAM_PROMO: return SHOW_ZASTOGRAM_PROMO;
+            case KEY_GHOST_NO_READ: return GHOST_NO_READ;
+            case KEY_GHOST_NO_STORIES: return GHOST_NO_STORIES;
+            case KEY_GHOST_NO_ONLINE: return GHOST_NO_ONLINE;
+            case KEY_GHOST_NO_TYPING: return GHOST_NO_TYPING;
         }
         return false;
     }
@@ -106,6 +130,10 @@ public final class ZaStoPrivacy {
             case KEY_DISABLE_ADS: DISABLE_ADS = value; break;
             case KEY_HIDE_ALL_CHATS: HIDE_ALL_CHATS = value; break;
             case KEY_SHOW_ZASTOGRAM_PROMO: SHOW_ZASTOGRAM_PROMO = value; break;
+            case KEY_GHOST_NO_READ: GHOST_NO_READ = value; break;
+            case KEY_GHOST_NO_STORIES: GHOST_NO_STORIES = value; break;
+            case KEY_GHOST_NO_ONLINE: GHOST_NO_ONLINE = value; break;
+            case KEY_GHOST_NO_TYPING: GHOST_NO_TYPING = value; break;
             default: return;
         }
         try {
