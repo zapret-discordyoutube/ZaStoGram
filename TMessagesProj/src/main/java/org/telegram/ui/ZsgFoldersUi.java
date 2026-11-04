@@ -24,6 +24,10 @@ import java.util.ArrayList;
 public class ZsgFoldersUi {
 
     private static void showNameDialog(BaseFragment fragment, String title, String initial, Utilities.Callback<String> done) {
+        showTextDialog(fragment, title, initial, false, done);
+    }
+
+    private static void showTextDialog(BaseFragment fragment, String title, String initial, boolean allowEmpty, Utilities.Callback<String> done) {
         final Context context = fragment.getParentActivity();
         if (context == null) {
             return;
@@ -46,7 +50,7 @@ public class ZsgFoldersUi {
         builder.setView(layout);
         builder.setPositiveButton(LocaleController.getString(R.string.Save), (dialog, which) -> {
             final String text = input.getText().toString().trim();
-            if (!text.isEmpty()) {
+            if (allowEmpty || !text.isEmpty()) {
                 done.run(text);
             }
         });
@@ -81,6 +85,8 @@ public class ZsgFoldersUi {
         }
         final CharSequence[] items = new CharSequence[] {
             LocaleController.getString(R.string.ZsgFoldersRename),
+            LocaleController.getString(R.string.ZsgFoldersIcon),
+            LocaleController.getString(R.string.ZsgFoldersColor),
             LocaleController.getString(R.string.ZsgFoldersSubfolder),
             LocaleController.getString(R.string.ZsgFoldersParent),
             LocaleController.getString(R.string.ZsgFoldersMoveUp),
@@ -95,21 +101,68 @@ public class ZsgFoldersUi {
                     showNameDialog(fragment, LocaleController.getString(R.string.ZsgFoldersRename), folder.title, name -> store.rename(folderId, name));
                     break;
                 case 1:
-                    showCreate(fragment, folderId);
+                    showTextDialog(fragment, LocaleController.getString(R.string.ZsgFoldersIcon), folder.icon, true, value -> store.setIcon(folderId, value));
                     break;
                 case 2:
-                    showParentChooser(fragment, folderId);
+                    showColorChooser(fragment, folderId);
                     break;
                 case 3:
-                    store.moveBy(folderId, -1);
+                    showCreate(fragment, folderId);
                     break;
                 case 4:
-                    store.moveBy(folderId, 1);
+                    showParentChooser(fragment, folderId);
                     break;
                 case 5:
+                    store.moveBy(folderId, -1);
+                    break;
+                case 6:
+                    store.moveBy(folderId, 1);
+                    break;
+                case 7:
                     store.setSync(folderId, !folder.sync);
                     Toast.makeText(context, LocaleController.getString(!folder.sync ? R.string.ZsgFoldersSyncOn : R.string.ZsgFoldersSyncOff), Toast.LENGTH_SHORT).show();
                     break;
+            }
+        });
+        fragment.showDialog(builder.create());
+    }
+
+    private static final String[] COLOR_NAMES = {
+        "Red", "Pink", "Purple", "Deep purple", "Indigo", "Blue",
+        "Cyan", "Teal", "Green", "Lime", "Orange", "Brown"
+    };
+    private static final String[] COLOR_VALUES = {
+        "#e57373", "#f06292", "#ba68c8", "#9575cd", "#7986cb", "#64b5f6",
+        "#4dd0e1", "#4db6ac", "#81c784", "#dce775", "#ffb74d", "#a1887f"
+    };
+
+    /** A ready color, no color, or any color typed as #RRGGBB. */
+    private static void showColorChooser(BaseFragment fragment, int folderId) {
+        final Context context = fragment.getParentActivity();
+        final ZsgFolders store = ZsgFolders.getInstance(fragment.getCurrentAccount());
+        final ZsgFolders.Folder folder = store.find(folderId);
+        if (context == null || folder == null) {
+            return;
+        }
+        final CharSequence[] items = new CharSequence[COLOR_NAMES.length + 2];
+        items[0] = LocaleController.getString(R.string.ZsgFoldersColorNone);
+        for (int i = 0; i < COLOR_NAMES.length; i++) {
+            items[i + 1] = COLOR_NAMES[i] + "  " + COLOR_VALUES[i];
+        }
+        items[items.length - 1] = LocaleController.getString(R.string.ZsgFoldersColorCustom);
+        final AlertDialog.Builder builder = new AlertDialog.Builder(context);
+        builder.setTitle(LocaleController.getString(R.string.ZsgFoldersColor));
+        builder.setItems(items, (dialog, which) -> {
+            if (which == 0) {
+                store.setColor(folderId, "");
+            } else if (which == items.length - 1) {
+                showTextDialog(fragment, LocaleController.getString(R.string.ZsgFoldersColor), folder.color, true, value -> {
+                    if (!store.setColor(folderId, value) && !value.trim().isEmpty()) {
+                        Toast.makeText(context, "#RRGGBB", Toast.LENGTH_SHORT).show();
+                    }
+                });
+            } else {
+                store.setColor(folderId, COLOR_VALUES[which - 1]);
             }
         });
         fragment.showDialog(builder.create());

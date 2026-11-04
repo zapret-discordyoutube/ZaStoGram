@@ -11859,6 +11859,10 @@
     <string name="ZsgFoldersName">Folder name</string>
     <string name="ZsgFoldersSettings">ZaStoGram folder settings</string>
     <string name="ZsgFoldersRename">Rename</string>
+    <string name="ZsgFoldersIcon">Icon (any emoji)</string>
+    <string name="ZsgFoldersColor">Color</string>
+    <string name="ZsgFoldersColorNone">No color</string>
+    <string name="ZsgFoldersColorCustom">Any color (#RRGGBB)…</string>
     <string name="ZsgFoldersSubfolder">New subfolder</string>
     <string name="ZsgFoldersParent">Parent folder</string>
     <string name="ZsgFoldersTopLevel">Top level</string>

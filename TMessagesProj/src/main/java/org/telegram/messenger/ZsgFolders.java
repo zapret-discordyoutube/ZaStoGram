@@ -362,6 +362,43 @@ public class ZsgFolders extends BaseController {
         return true;
     }
 
+    public boolean setIcon(int id, String icon) {
+        synchronized (this) {
+            final Folder folder = find(id);
+            final String value = icon == null ? "" : icon.trim();
+            if (folder == null || folder.icon.equals(value)) {
+                return false;
+            }
+            folder.icon = value;
+            folder.rev = System.currentTimeMillis();
+        }
+        changed();
+        return true;
+    }
+
+    /** Any color as #RRGGBB, empty for none; stored lower-case like the Windows client does. */
+    public boolean setColor(int id, String color) {
+        String value = "";
+        if (color != null && !color.trim().isEmpty()) {
+            try {
+                final int parsed = android.graphics.Color.parseColor(color.trim());
+                value = String.format(java.util.Locale.US, "#%06x", 0xFFFFFF & parsed);
+            } catch (IllegalArgumentException e) {
+                return false;
+            }
+        }
+        synchronized (this) {
+            final Folder folder = find(id);
+            if (folder == null || folder.color.equals(value)) {
+                return false;
+            }
+            folder.color = value;
+            folder.rev = System.currentTimeMillis();
+        }
+        changed();
+        return true;
+    }
+
     public boolean move(int id, int newParentId) {
         synchronized (this) {
             final Folder folder = find(id);
