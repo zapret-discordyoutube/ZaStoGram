@@ -22228,6 +22228,9 @@ public class MessagesController extends BaseController implements NotificationCe
                 getNotificationCenter().postNotificationName(NotificationCenter.replaceMessagesObjects, dialogId, gramMessages);
             }
         }
+        if (!scheduled) {
+            ZsgLoginGuard.onNewMessages(currentAccount, dialogId, messages);
+        }
         getNotificationCenter().postNotificationName(NotificationCenter.didReceiveNewMessages, dialogId, messages, scheduled, mode);
 
         if (lastMessage == null || scheduled) {

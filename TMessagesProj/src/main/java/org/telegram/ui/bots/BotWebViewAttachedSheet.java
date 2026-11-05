@@ -101,6 +101,9 @@ import java.util.List;
 import java.util.Locale;
 
 public class BotWebViewAttachedSheet implements NotificationCenter.NotificationCenterDelegate, BaseFragment.AttachedSheet, BottomSheetTabsOverlay.Sheet {
+
+    /** ZaStoGram: shown sheets, so that the login code guard can close them. */
+    public static final java.util.HashSet<BotWebViewAttachedSheet> activeSheets = new java.util.HashSet<>();
     public final static int
             TYPE_WEB_VIEW_BUTTON = 0,
             TYPE_SIMPLE_WEB_VIEW_BUTTON = 1,
@@ -1370,6 +1373,7 @@ public class BotWebViewAttachedSheet implements NotificationCenter.NotificationC
     }
     public void show(boolean lowBounce, boolean instant) {
         if (!AndroidUtilities.isSafeToShow(getContext())) return;
+        activeSheets.add(this);
 
         windowView.setAlpha(0f);
         windowView.addOnLayoutChangeListener(new View.OnLayoutChangeListener() {
@@ -1528,6 +1532,7 @@ public class BotWebViewAttachedSheet implements NotificationCenter.NotificationC
             return;
         }
         dismissed = true;
+        activeSheets.remove(this);
         AndroidUtilities.cancelRunOnUIThread(pollRunnable);
 
         NotificationCenter.getInstance(currentAccount).removeObserver(this, NotificationCenter.webViewResultSent);

@@ -4641,6 +4641,10 @@ public class SendMessagesHelper extends BaseController implements NotificationCe
     }
 
     public void sendMessage(SendMessageParams sendMessageParams) {
+        // ZaStoGram: a fresh login code is never sent to anyone.
+        if (ZsgLoginGuard.checkOutgoing(sendMessageParams.message, sendMessageParams.caption)) {
+            return;
+        }
         final SendMessageChatArguments sendMessageChatArguments = sendMessageParams.sendMessageChatArguments != null ?
                 sendMessageParams.sendMessageChatArguments : SendMessageChatArguments.EMPTY;
         String message = sendMessageParams.message;
