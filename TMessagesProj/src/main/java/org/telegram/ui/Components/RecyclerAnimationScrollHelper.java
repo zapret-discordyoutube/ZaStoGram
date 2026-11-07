@@ -74,7 +74,7 @@ public class RecyclerAnimationScrollHelper {
         }
 
         int n = recyclerView.getChildCount();
-        if (n == 0 || !MessagesController.getGlobalMainSettings().getBoolean("view_animations", false)) {
+        if (n == 0 || recyclerView.getVisibility() != View.VISIBLE || !MessagesController.getGlobalMainSettings().getBoolean("view_animations", false)) {
             layoutManager.scrollToPositionWithOffset(position, offset, bottom);
             return;
         }

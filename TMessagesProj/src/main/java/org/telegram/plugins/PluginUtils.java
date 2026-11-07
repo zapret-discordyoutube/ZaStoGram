@@ -5,7 +5,7 @@ import android.content.Context;
 import org.telegram.messenger.AccountInstance;
 import org.telegram.messenger.AndroidUtilities;
 import org.telegram.messenger.ApplicationLoader;
-import org.telegram.messenger.DispatchQueue;
+import org.telegram.messenger.DispatchQueue2;
 import org.telegram.messenger.FileLog;
 import org.telegram.messenger.MessageObject;
 import org.telegram.messenger.MessagesController;
@@ -84,14 +84,14 @@ public final class PluginUtils {
         if (r == null) {
             return;
         }
-        DispatchQueue queue = getQueueByName(queueName);
+        DispatchQueue2 queue = getQueueByName(queueName);
         if (queue == null) {
             queue = Utilities.globalQueue;
         }
         queue.postRunnable(r, Math.max(0, delayMs));
     }
 
-    public static DispatchQueue getQueueByName(String name) {
+    public static DispatchQueue2 getQueueByName(String name) {
         if ("stageQueue".equals(name)) {
             return Utilities.stageQueue;
         } else if ("globalQueue".equals(name) || "pluginsQueue".equals(name)) {

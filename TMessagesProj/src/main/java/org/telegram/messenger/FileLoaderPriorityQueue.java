@@ -20,16 +20,17 @@ public class FileLoaderPriorityQueue {
     public final static int PRIORITY_VALUE_NORMAL = (1 << 16);
     public final static int PRIORITY_VALUE_LOW = 0;
 
-    final DispatchQueue workerQueue;
+    final DispatchQueue2 workerQueue;
 
     boolean checkOperationsScheduled = false;
+    private final Runnable checkVisibleStoryRunnable = () -> checkLoadingOperations();
 
     Runnable checkOperationsRunnable = () -> {
         checkLoadingOperationInternal();
         checkOperationsScheduled = false;
     };
 
-    FileLoaderPriorityQueue(int currentAccount, FileLoader startupGate, String name, int type, DispatchQueue workerQueue) {
+    FileLoaderPriorityQueue(int currentAccount, FileLoader startupGate, String name, int type, DispatchQueue2 workerQueue) {
         this.currentAccount = currentAccount;
         this.startupGate = startupGate;
         this.name = name;
@@ -97,9 +98,26 @@ public class FileLoaderPriorityQueue {
         FileLoadOperation firstProxyStartupBlockedOperation = null;
         int max = type == TYPE_LARGE ? MessagesController.getInstance(currentAccount).largeQueueMaxActiveOperations : MessagesController.getInstance(currentAccount).smallQueueMaxActiveOperations;
         tmpListOperations.clear();
+        // Until the visible story can be shown, other large downloads wait, as they would share its bandwidth.
+        FileLoadOperation visibleStory = null;
+        if (type == TYPE_LARGE && !allOperations.isEmpty()) {
+            FileLoadOperation first = allOperations.get(0);
+            if (first.isStory && first.getPriority() >= PRIORITY_VALUE_MAX && !first.preFinished && !first.hasStoryStartData()) {
+                visibleStory = first;
+                workerQueue.cancelRunnable(checkVisibleStoryRunnable);
+                workerQueue.postRunnable(checkVisibleStoryRunnable, 250);
+            }
+        }
         for (int i = 0; i < allOperations.size(); i++) {
             FileLoadOperation prevOperation = i > 0 ? allOperations.get(i - 1) : null;
             FileLoadOperation operation = allOperations.get(i);
+            // On a fast connection the visible story's own thumbnail and video load together.
+            if (visibleStory != null && operation != visibleStory && !(operation.parentObject == visibleStory.parentObject && DownloadSpeedEstimator.isFast())) {
+                if (operation.wasStarted()) {
+                    operation.pause();
+                }
+                continue;
+            }
             if (i > 0 && !pauseAllNextOperations) {
                 if (type == TYPE_LARGE) {
                     if (prevOperation != null && prevOperation.isStory && prevOperation.getPriority() >= PRIORITY_VALUE_MAX && operation.getPriority() <= PRIORITY_VALUE_LOW) {

@@ -20,6 +20,7 @@
 
 #define USE_DEBUG_SESSION false
 #define READ_BUFFER_SIZE 1024 * 1024 * 2
+#define MAX_DESERIALIZE_DEPTH 16
 //#define DEBUG_VERSION
 #define PFS_ENABLED 1
 #define DEFAULT_DATACENTER_ID INT_MAX
@@ -29,7 +30,7 @@
 // Upstream raised this from 2 to 8 for its own parallel downloads; ZaStoGram's tunnel
 // downloads (FileLoadOperation TUNNEL_PARALLEL_REQUESTS) rely on the same 8 connections.
 #define DOWNLOAD_CONNECTIONS_COUNT 8
-#define UPLOAD_CONNECTIONS_COUNT 4
+#define UPLOAD_CONNECTIONS_COUNT 8
 
 // Stream classes of the WEB proxy carrier; must match WebProxyFlow.CLASS_*.
 #define WEB_PROXY_STREAM_CLASS_INTERACTIVE 0
@@ -175,7 +176,7 @@ typedef struct ConnectiosManagerDelegate {
     virtual int32_t getInitFlags(int32_t instanceNum) = 0;
     virtual void onPremiumFloodWait(int32_t instanceNum, int32_t requestToken, bool isUpload) = 0;
     virtual void onIntegrityCheckClassic(int32_t instanceNum, int32_t requestToken, std::string project, std::string nonce) = 0;
-    virtual void onCaptchaCheck(int32_t instanceNum, int32_t requestToken, std::string action, std::string key_id) = 0;
+    virtual void onCaptchaCheck(int32_t instanceNum, int32_t requestToken, int32_t generation, std::string action, std::string key_id) = 0;
     // WEB proxy loopback bridge (org.telegram.proxy.WebProxyTransport). The
     // stream is named by the bridge port and the socket's local port.
     virtual void onWebProxyStreamOpened(int32_t bridgePort, int32_t localPort, int32_t streamClass, int32_t instanceNum) = 0;

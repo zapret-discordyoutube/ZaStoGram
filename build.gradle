@@ -7,9 +7,9 @@ buildscript {
     }
     dependencies {
         classpath 'com.android.tools.build:gradle:8.13.2'
-        classpath 'com.google.gms:google-services:4.3.15'
+        classpath 'com.google.gms:google-services:4.5.0'
         classpath 'com.huawei.agconnect:agcp:1.9.1.301'
-        classpath 'com.google.firebase:firebase-crashlytics-gradle:2.9.0'
+        classpath 'com.google.firebase:firebase-crashlytics-gradle:3.0.8'
         classpath "org.jetbrains.kotlin:kotlin-gradle-plugin:2.1.0"
         // ZaStoGram plugin engine: Chaquopy embeds CPython 3.11 into the APK.
         // 16.1.x supports AGP 7.0-8.13 (we use 8.10.1) and Python 3.8-3.13.
