@@ -304,9 +304,10 @@ def main() -> None:
         "ConnectionSocket must publish a concrete terminal diagnostic on failed current-proxy disconnects",
     )
     require(
-        "NotificationCenter.getInstance(currentAccount).addObserver(this, NotificationCenter.proxyConnectionStageChanged)" in text("proxy_list")
+        "NotificationCenter.getInstance(currentAccount).addWeakObserver(this, NotificationCenter.proxyConnectionStageChanged)" in text("proxy_list")
         and "NotificationCenter.getInstance(currentAccount).removeObserver(this, NotificationCenter.proxyConnectionStageChanged)" in text("proxy_list")
         and "NotificationCenter.getGlobalInstance().addObserver(this, NotificationCenter.proxyConnectionStageChanged)" not in text("proxy_list")
+        and "NotificationCenter.getGlobalInstance().addWeakObserver(this, NotificationCenter.proxyConnectionStageChanged)" not in text("proxy_list")
         and "NotificationCenter.getGlobalInstance().removeObserver(this, NotificationCenter.proxyConnectionStageChanged)" not in text("proxy_list")
         and "id == NotificationCenter.proxyConnectionStageChanged" in text("proxy_list"),
         "Proxy list must refresh header and current row only on current-account live proxy stage updates",
@@ -336,7 +337,7 @@ def main() -> None:
         "dialogs proxy menu must show the same concrete proxy phase as the proxy settings UI",
     )
     require(
-        "NotificationCenter.getInstance(currentAccount).addObserver(this, NotificationCenter.proxyConnectionStageChanged)" in text("chat_avatar")
+        "NotificationCenter.getInstance(currentAccount).addWeakObserver(this, NotificationCenter.proxyConnectionStageChanged)" in text("chat_avatar")
         and "NotificationCenter.getInstance(currentAccount).removeObserver(this, NotificationCenter.proxyConnectionStageChanged)" in text("chat_avatar")
         and "id == NotificationCenter.proxyConnectionStageChanged" in text("chat_avatar")
         and "ProxyCheckDiagnostics.headerStatusText" in text("chat_avatar")

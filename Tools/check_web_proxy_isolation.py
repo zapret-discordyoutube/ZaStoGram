@@ -54,6 +54,7 @@ import tempfile
 ROOT = Path(__file__).resolve().parents[1]
 JAVA = ROOT / "TMessagesProj/src/main/java/org/telegram"
 CONNECTIONS = JAVA / "tgnet/ConnectionsManager.java"
+FILE_UPLOAD = JAVA / "messenger/FileUploadOperation.java"
 PROXY_LIST = JAVA / "ui/ProxyListActivity.java"
 LINK_HELPER = JAVA / "messenger/ProxyLinkHelper.java"
 SHARED_CONFIG = JAVA / "messenger/SharedConfig.java"
@@ -321,9 +322,13 @@ def check_carrier_aware_data_path(require) -> None:
             "a second -404 before any decrypted reply is believed")
 
     # Connections: the carrier windows bound the queue, so a WEB proxy keeps
-    # tgnet's usual four upload connections (upstream behaviour).
-    upload = method_body(connections, "public static int getMtProxySoftMuxUploadConnectionType(int requestIndex)")
-    require("WebProxyTransport" not in upload and "requestIndex % 4" in upload,
+    # the upload slot selected by tgnet (at least four, and eight for Premium).
+    upload = method_body(connections, "public static int getMtProxySoftMuxUploadConnectionType(int directConnectionType)")
+    file_upload = FILE_UPLOAD.read_text(encoding="utf-8")
+    require("WebProxyTransport" not in upload
+            and "return directConnectionType;" in upload
+            and "uploadConnectionsCount = AccountInstance.getInstance(currentAccount).getUserConfig().isPremium() ? ConnectionsManager.UploadConnectionsCountPremium : 4;" in file_upload
+            and "getMtProxySoftMuxUploadConnectionType(connectionType)" in file_upload,
             "uploads through a WEB proxy must not be cut below tgnet's four connections")
     download = method_body(connections, "public static int getMtProxySoftMuxDownloadConnectionType(int requestIndex)")
     require("ConnectionTypeDownload2" in download,

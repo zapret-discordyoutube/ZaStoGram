@@ -64,7 +64,7 @@ checks = [
     (PROXY_LIST, "ProxyCheckDiagnostics.statusText", "proxy list must render proxy status through the diagnostic map"),
     (PROXY_LIST, "ProxyCheckDiagnostics.statusColorKey", "proxy list must choose status color through the diagnostic map"),
     (PROXY_LIST, "updateProxyActionBarStatus", "proxy list must keep the window header status in sync"),
-    (PROXY_LIST, "actionBar.setSubtitle", "proxy list must surface the current proxy phase in the window header"),
+    (PROXY_LIST, "simpleActionBar.setSubtitle", "proxy list must surface the current proxy phase in the window header"),
     (PROXY_SETTINGS, "R.string.UseProxyTelegramInfoStealth", "proxy settings does not show MTProto stealth hint"),
     (ANDROID_UTILITIES, "ProxyCheckScheduler.enqueueNow", "bottom-sheet proxy check must use the shared scheduler instead of direct native checkProxy"),
     (ANDROID_UTILITIES, "new SharedConfig.ProxyInfo", "bottom-sheet proxy check must pass through the shared ProxyInfo lifecycle"),

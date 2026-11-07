@@ -132,8 +132,9 @@ def main() -> None:
         "FileLoadOperation must use the MTProxy soft mux policy for download slots",
     )
     require(
-        "getMtProxySoftMuxUploadConnectionType(requestNumFinal)" in file_upload,
-        "FileUploadOperation must use the MTProxy soft mux policy for upload slots",
+        "getMtProxySoftMuxUploadConnectionType(connectionType)" in file_upload
+        and "return directConnectionType;" in connections,
+        "FileUploadOperation must apply the MTProxy soft mux policy to the upload slot selected by upstream",
     )
     require(
         "mtProxyConnectionPatternMode" in shared_config

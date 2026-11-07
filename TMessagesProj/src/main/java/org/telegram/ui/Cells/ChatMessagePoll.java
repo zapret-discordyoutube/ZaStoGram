@@ -1561,20 +1561,25 @@ class ChatMessagePoll {
         if (cell.titleLayout != null) {
             canvas.save();
             canvas.translate(x + cell.getExtraTextX(),  dp(15) + cell.namesOffset + contentHeightWithOffset + cell.captionHeight + targetExplanationHeight);
-            int oldAlpha = Theme.chat_audioTitlePaint.getAlpha();
+            final TextPaint titleTextPaint = cell.titleLayout.getPaint();
+            titleTextPaint.setColor(color1);
+            titleTextPaint.linkColor = linkColor;
+            final int oldAlpha = titleTextPaint.getAlpha();
             if (cell.transitionParams.animateTitleLayout != null) {
-                Theme.chat_audioTitlePaint.setAlpha((int) (cell.transitionParams.animateChangeProgress * oldAlpha));
+                titleTextPaint.setAlpha((int) (cell.transitionParams.animateChangeProgress * oldAlpha));
             }
             cell.titleLayout.draw(canvas);
             AnimatedEmojiSpan.drawAnimatedEmojis(canvas, cell.titleLayout, cell.animatedEmojiPollQuestion, 0, null, 0, 0, 0, cell.transitionParams.animateTitleLayout != null ? cell.transitionParams.animateChangeProgress : 1.0f, cell.getAdaptiveEmojiColorFilter(1, cell.titleLayout.getPaint().getColor()));
-            if (cell.transitionParams.animateTitleLayout != null) {
-                Theme.chat_audioTitlePaint.setAlpha(oldAlpha);
-            }
+            titleTextPaint.setAlpha(oldAlpha);
             titleLayoutHeight = cell.titleLayout.getHeight();
             if (cell.transitionParams.animateTitleLayout != null) {
-                Theme.chat_audioTitlePaint.setAlpha((int) ((1.0f - cell.transitionParams.animateChangeProgress) * oldAlpha));
+                final TextPaint animateTitleTextPaint = cell.transitionParams.animateTitleLayout.getPaint();
+                animateTitleTextPaint.setColor(color1);
+                animateTitleTextPaint.linkColor = linkColor;
+                final int oldAnimateTitleAlpha = animateTitleTextPaint.getAlpha();
+                animateTitleTextPaint.setAlpha((int) ((1.0f - cell.transitionParams.animateChangeProgress) * oldAnimateTitleAlpha));
                 cell.transitionParams.animateTitleLayout.draw(canvas);
-                Theme.chat_audioTitlePaint.setAlpha(oldAlpha);
+                animateTitleTextPaint.setAlpha(oldAnimateTitleAlpha);
                 AnimatedEmojiSpan.drawAnimatedEmojis(canvas, cell.transitionParams.animateTitleLayout, cell.transitionParams.animateTitleLayoutEmoji, 0, null, 0, 0, 0, 1.0f - cell.transitionParams.animateChangeProgress, cell.getAdaptiveEmojiColorFilter(1, cell.transitionParams.animateTitleLayout.getPaint().getColor()));
                 titleLayoutHeight = AndroidUtilities.lerp(cell.transitionParams.animateTitleLayout.getHeight(), titleLayoutHeight, cell.transitionParams.animateChangeProgress);
             }
@@ -1751,9 +1756,12 @@ class ChatMessagePoll {
             if (cell.transitionParams.animateBackgroundBoundsInner) {
                 canvas.translate(0, cell.transitionParams.deltaTop);
             }
-            int oldAlpha3 = Theme.chat_audioPerformerPaint.getAlpha();
+            final TextPaint buttonTitlePaint = button.title.getPaint();
+            buttonTitlePaint.setColor(color1);
+            buttonTitlePaint.linkColor = linkColor;
+            final int oldAlpha3 = buttonTitlePaint.getAlpha();
             if (button.animateTitle != null) {
-                Theme.chat_audioPerformerPaint.setAlpha((int) (oldAlpha3 * cell.transitionParams.animateChangeProgress));
+                buttonTitlePaint.setAlpha((int) (oldAlpha3 * cell.transitionParams.animateChangeProgress));
             }
             canvas.save();
             if (todo && todoAllowed && button.author != null && cell.pollCheckBox[a] != null) {
@@ -1771,11 +1779,16 @@ class ChatMessagePoll {
 
             button.title.draw(canvas);
             AnimatedEmojiSpan.drawAnimatedEmojis(canvas, button.title, button.animatedEmoji, 0, null, 0, 0, 0, button.animateTitle != null ? cell.transitionParams.animateChangeProgress : 1.0f, cell.getAdaptiveEmojiColorFilter(1, button.title.getPaint().getColor()));
+            buttonTitlePaint.setAlpha(oldAlpha3);
             if (button.animateTitle != null) {
-                Theme.chat_audioPerformerPaint.setAlpha((int) (oldAlpha3 * (1.0f - cell.transitionParams.animateChangeProgress)));
+                final TextPaint animateTitlePaint = button.animateTitle.getPaint();
+                animateTitlePaint.setColor(color1);
+                animateTitlePaint.linkColor = linkColor;
+                final int oldAnimateTitleAlpha = animateTitlePaint.getAlpha();
+                animateTitlePaint.setAlpha((int) (oldAnimateTitleAlpha * (1.0f - cell.transitionParams.animateChangeProgress)));
                 button.animateTitle.draw(canvas);
                 AnimatedEmojiSpan.drawAnimatedEmojis(canvas, button.animateTitle, button.animateTitleEmoji, 0, null, 0, 0, 0, 1.0f - cell.transitionParams.animateChangeProgress, cell.getAdaptiveEmojiColorFilter(1, button.animateTitle.getPaint().getColor()));
-                Theme.chat_audioPerformerPaint.setAlpha(oldAlpha3);
+                animateTitlePaint.setAlpha(oldAnimateTitleAlpha);
             }
             canvas.restore();
             if (todo && todoAllowed && button.author != null && cell.pollCheckBox[a] != null) {
@@ -1786,7 +1799,7 @@ class ChatMessagePoll {
                         .draw(canvas, 0, button.title.getHeight() - dp(6) + button.author.getHeight() / 2f, color2, progress);
                 }
             }
-            Theme.chat_audioPerformerPaint.setAlpha(oldAlpha3);
+            buttonTitlePaint.setAlpha(oldAlpha3);
 
             if (!todo && (cell.pollVoted && (hasResults || !hideResults) || cell.pollClosed || cell.pollResultsPreview || (hasVoteRestrictions && (!hideResults || hasResults)) || animateAnswerAlpha && !isVotedButHiddenResults)) {
                 if (cell.lastPoll != null && cell.lastPoll.quiz/* && pollVoted*/) {

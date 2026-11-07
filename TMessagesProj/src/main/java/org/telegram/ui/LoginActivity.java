@@ -112,7 +112,6 @@ import com.google.android.gms.common.api.ApiException;
 import com.google.android.gms.tasks.CancellationTokenSource;
 import com.google.firebase.pnv.VerificationSupportResult;
 
-import org.json.JSONException;
 import org.json.JSONObject;
 import org.telegram.PhoneFormat.PhoneFormat;
 import org.telegram.messenger.AccountInstance;

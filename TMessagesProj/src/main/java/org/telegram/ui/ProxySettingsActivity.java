@@ -950,6 +950,9 @@ public class ProxySettingsActivity extends BaseFragment {
             ThemeBind.textColor(shareCell.getTextView(), shareDoneEnabled ? Theme.key_windowBackgroundWhiteBlueText4 : Theme.key_windowBackgroundWhiteGrayText2);
         }
         if (inputFields != null) {
+            quickProxyLinkField.setLineColors(Theme.getColor(Theme.key_windowBackgroundWhiteInputField),
+                    Theme.getColor(Theme.key_windowBackgroundWhiteInputFieldActivated),
+                    Theme.getColor(Theme.key_text_RedRegular));
             for (int i = 0; i < inputFields.length; i++) {
                 if (inputFields[i] == null) continue;
                 ThemeBind.lineColors(inputFields[i], Theme.key_windowBackgroundWhiteInputField, Theme.key_windowBackgroundWhiteInputFieldActivated, Theme.key_text_RedRegular);
