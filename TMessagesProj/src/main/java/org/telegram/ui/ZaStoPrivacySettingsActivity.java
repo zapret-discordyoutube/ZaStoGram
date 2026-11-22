@@ -50,6 +50,7 @@ public class ZaStoPrivacySettingsActivity extends BaseFragment {
     private int videoNoRecompressRow;
     private int infoRow;
     private int ghostHeaderRow;
+    private int localEmojiRow;
     private int ghostAllRow;
     private int ghostReadRow;
     private int ghostStoriesRow;
@@ -71,6 +72,7 @@ public class ZaStoPrivacySettingsActivity extends BaseFragment {
         muteScreenshotRow = rowCount++;
         disableAdsRow = rowCount++;
         zastogramPromoRow = rowCount++;
+        localEmojiRow = rowCount++;
         videoNoRecompressRow = rowCount++;
         infoRow = rowCount++;
         ghostHeaderRow = rowCount++;
@@ -188,6 +190,7 @@ public class ZaStoPrivacySettingsActivity extends BaseFragment {
         if (position == muteScreenshotRow) return ZaStoPrivacy.KEY_MUTE_SCREENSHOT_PING;
         if (position == disableAdsRow) return ZaStoPrivacy.KEY_DISABLE_ADS;
         if (position == zastogramPromoRow) return ZaStoPrivacy.KEY_SHOW_ZASTOGRAM_PROMO;
+        if (position == localEmojiRow) return ZaStoPrivacy.KEY_LOCAL_PREMIUM_EMOJI;
         return null;
     }
 
@@ -205,6 +208,7 @@ public class ZaStoPrivacySettingsActivity extends BaseFragment {
         if (position == muteScreenshotRow) return "Не сообщать о скриншоте (секретные чаты)";
         if (position == disableAdsRow) return "Отключить рекламу";
         if (position == zastogramPromoRow) return "Закреплять канал ZaStoGram в списке чатов";
+        if (position == localEmojiRow) return "Анимированные эмодзи без Premium";
         return "";
     }
 
@@ -268,7 +272,7 @@ public class ZaStoPrivacySettingsActivity extends BaseFragment {
                         ((TextInfoPrivacyCell) holder.itemView).setText("Отметка о прочтении и просмотр историй не уходят на сервер: собеседник не увидит «прочитано», автор истории — ваш просмотр. У вас чат при этом выглядит прочитанным, а после перезапуска непрочитанное может вернуться. Если вы сами отправите сообщение, Telegram всё равно отметит чат прочитанным. Без онлайн-статуса приложение всегда остаётся офлайн.");
                         break;
                     }
-                    ((TextInfoPrivacyCell) holder.itemView).setText("По умолчанию всё включено. Выключение тумблера отменяет соответствующую функцию ZaSto. Без закрепления канал ZaStoGram становится обычным чатом: его можно убрать в архив. Видео без пережатия уходит оригиналом, как с компьютера: быстрее, но больше по объёму; видео с обрезкой, рисованием или фильтрами пережимается всегда.");
+                    ((TextInfoPrivacyCell) holder.itemView).setText("По умолчанию всё включено. Выключение тумблера отменяет соответствующую функцию ZaSto. Без закрепления канал ZaStoGram становится обычным чатом: его можно убрать в архив. Видео без пережатия уходит оригиналом, как с компьютера: быстрее, но больше по объёму; видео с обрезкой, рисованием или фильтрами пережимается всегда. Анимированные эмодзи без Premium видите только вы: собеседник получит обычный текст без них.");
                     break;
                 case VIEW_TYPE_VALUE:
                     ((TextSettingsCell) holder.itemView).setTextAndValue("Видео без пережатия", ZaStoVideoCompression.describe(ZaStoVideoCompression.getLimitMb()), false);

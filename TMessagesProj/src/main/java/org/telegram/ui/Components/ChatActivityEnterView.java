@@ -147,6 +147,7 @@ import org.telegram.messenger.SendMessagesHelper;
 import org.telegram.messenger.SharedConfig;
 import org.telegram.messenger.SharedPrefsHelper;
 import org.telegram.messenger.UserConfig;
+import org.telegram.messenger.ZaStoPrivacy;
 import org.telegram.messenger.UserObject;
 import org.telegram.messenger.Utilities;
 import org.telegram.messenger.VideoEditedInfo;
@@ -7572,6 +7573,10 @@ public class ChatActivityEnterView extends FrameLayout implements
         if (message == null || parentFragment == null) {
             return false;
         }
+        if (ZaStoPrivacy.LOCAL_PREMIUM_EMOJI) {
+            // ZaStoGram: the emoji stay local, the server never gets them.
+            return false;
+        }
         final boolean isPremium = UserConfig.getInstance(currentAccount).isPremium();
         if (!isPremium && UserConfig.getInstance(currentAccount).getClientUserId() != dialogId && message instanceof Spanned) {
             AnimatedEmojiSpan[] animatedEmojis = ((Spanned) message).getSpans(0, message.length(), AnimatedEmojiSpan.class);
@@ -12063,6 +12068,7 @@ public class ChatActivityEnterView extends FrameLayout implements
                 }
             }
         };
+        emojiView.allowEmojisForNonPremium(ZaStoPrivacy.LOCAL_PREMIUM_EMOJI);
         emojiView.shouldDrawStickerSettings = true;
         if (!shouldDrawBackground) {
             emojiView.updateColors();

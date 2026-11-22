@@ -3742,11 +3742,11 @@ public class SendMessagesHelper extends BaseController implements NotificationCe
                         request.flags |= 2048;
                         request.no_webpage = !messageObject.editingMessageSearchWebPage;
                         if (messageObject.editingMessageEntities != null) {
-                            request.entities = messageObject.editingMessageEntities;
+                            request.entities = ZaStoPrivacy.wireEntities(currentAccount, messageObject.getDialogId(), messageObject.editingMessageEntities);
                             request.flags |= 8;
                         } else {
                             CharSequence[] message = new CharSequence[]{messageObject.editingMessage};
-                            ArrayList<TLRPC.MessageEntity> entities = getMediaDataController().getEntities(message, supportsSendingNewEntities);
+                            ArrayList<TLRPC.MessageEntity> entities = ZaStoPrivacy.wireEntities(currentAccount, messageObject.getDialogId(), getMediaDataController().getEntities(message, supportsSendingNewEntities));
                             if (entities != null && !entities.isEmpty()) {
                                 request.entities = entities;
                                 request.flags |= 8;
@@ -4721,6 +4721,8 @@ public class SendMessagesHelper extends BaseController implements NotificationCe
         if (peer == 0) {
             return;
         }
+        // ZaStoGram: local-only custom emoji stay in the local message.
+        final ArrayList<TLRPC.MessageEntity> wireEntities = ZaStoPrivacy.wireEntities(currentAccount, peer, entities);
         if (richMessage != null && DialogObject.isEncryptedDialog(peer)) {
             return;
         }
@@ -5642,8 +5644,8 @@ public class SendMessagesHelper extends BaseController implements NotificationCe
                         if (newMsg.from_id != null) {
                             reqSend.send_as = getMessagesController().getInputPeer(newMsg.from_id);
                         }
-                        if (entities != null && !entities.isEmpty()) {
-                            reqSend.entities = entities;
+                        if (wireEntities != null && !wireEntities.isEmpty()) {
+                            reqSend.entities = wireEntities;
                             reqSend.flags |= 8;
                         }
                         if (scheduleDate != 0) {
@@ -5709,8 +5711,8 @@ public class SendMessagesHelper extends BaseController implements NotificationCe
                         if (!searchLinks) {
                             reqSend.no_webpage = true;
                         }
-                        if (entities != null && !entities.isEmpty()) {
-                            reqSend.entities = entities;
+                        if (wireEntities != null && !wireEntities.isEmpty()) {
+                            reqSend.entities = wireEntities;
                             reqSend.flags |= 8;
                         }
                         if (scheduleDate != 0) {
@@ -5744,8 +5746,8 @@ public class SendMessagesHelper extends BaseController implements NotificationCe
                     TLRPC.TL_decryptedMessage reqSend;
                     reqSend = new TLRPC.TL_decryptedMessage();
                     reqSend.ttl = newMsg.ttl;
-                    if (entities != null && !entities.isEmpty()) {
-                        reqSend.entities = entities;
+                    if (wireEntities != null && !wireEntities.isEmpty()) {
+                        reqSend.entities = wireEntities;
                         reqSend.flags |= TLRPC.MESSAGE_FLAG_HAS_ENTITIES;
                     }
                     if (newMsg.reply_to != null && newMsg.reply_to.reply_to_random_id != 0) {
@@ -6175,8 +6177,8 @@ public class SendMessagesHelper extends BaseController implements NotificationCe
                             req.peer = sendToPeer;
                             req.silent = newMsg.silent;
                             req.message = caption;
-                            if (entities != null && !entities.isEmpty()) {
-                                req.entities = entities;
+                            if (wireEntities != null && !wireEntities.isEmpty()) {
+                                req.entities = wireEntities;
                                 req.flags |= 8;
                             }
                             if (payStars > 0) {
@@ -6292,8 +6294,8 @@ public class SendMessagesHelper extends BaseController implements NotificationCe
                             inputSingleMedia.random_id = newMsg.random_id;
                             inputSingleMedia.media = inputMedia;
                             inputSingleMedia.message = caption;
-                            if (entities != null && !entities.isEmpty()) {
-                                inputSingleMedia.entities = entities;
+                            if (wireEntities != null && !wireEntities.isEmpty()) {
+                                inputSingleMedia.entities = wireEntities;
                                 inputSingleMedia.flags |= 1;
                             }
                             ((TLRPC.TL_messages_sendMultiMedia) request).multi_media.add(inputSingleMedia);
@@ -6334,8 +6336,8 @@ public class SendMessagesHelper extends BaseController implements NotificationCe
                         }
                         request.media = inputMedia;
                         request.message = caption;
-                        if (entities != null && !entities.isEmpty()) {
-                            request.entities = entities;
+                        if (wireEntities != null && !wireEntities.isEmpty()) {
+                            request.entities = wireEntities;
                             request.flags |= 8;
                         }
                         if (scheduleDate != 0) {
@@ -6418,8 +6420,8 @@ public class SendMessagesHelper extends BaseController implements NotificationCe
                         reqSend = new TLRPC.TL_decryptedMessage_layer45();
                     }
                     reqSend.ttl = newMsg.ttl;
-                    if (entities != null && !entities.isEmpty()) {
-                        reqSend.entities = entities;
+                    if (wireEntities != null && !wireEntities.isEmpty()) {
+                        reqSend.entities = wireEntities;
                         reqSend.flags |= TLRPC.MESSAGE_FLAG_HAS_ENTITIES;
                     }
                     if (newMsg.reply_to != null && newMsg.reply_to.reply_to_random_id != 0) {
@@ -8547,7 +8549,7 @@ public class SendMessagesHelper extends BaseController implements NotificationCe
                             existFlags = msgObj.getMediaExistanceFlags();
                             newMsgObj.local_id = newMsgObj.id = res.id;
                             newMsgObj.date = res.date;
-                            newMsgObj.entities = res.entities;
+                            newMsgObj.entities = ZaStoPrivacy.keepLocalEmoji(currentAccount, newMsgObj, newMsgObj.message, res.entities);
                             newMsgObj.out = res.out;
                             if ((res.flags & 33554432) != 0) {
                                 newMsgObj.ttl_period = res.ttl_period;
@@ -8698,6 +8700,10 @@ public class SendMessagesHelper extends BaseController implements NotificationCe
                                 if ((message.flags & 33554432) != 0) {
                                     msgObj.messageOwner.ttl_period = message.ttl_period;
                                     msgObj.messageOwner.flags |= 33554432;
+                                }
+                                message.entities = ZaStoPrivacy.keepLocalEmoji(currentAccount, msgObj.messageOwner, message.message, message.entities);
+                                if (message.entities != null && !message.entities.isEmpty()) {
+                                    message.flags |= TLRPC.MESSAGE_FLAG_HAS_ENTITIES;
                                 }
                                 msgObj.messageOwner.entities = message.entities;
                                 msgObj.messageOwner.quick_reply_shortcut_id = message.quick_reply_shortcut_id;

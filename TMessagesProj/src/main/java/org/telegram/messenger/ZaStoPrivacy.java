@@ -1,5 +1,10 @@
 package org.telegram.messenger;
 
+import java.util.Collections;
+import java.util.ArrayList;
+import org.telegram.ui.Components.AnimatedEmojiDrawable;
+import org.telegram.tgnet.TLRPC;
+import android.text.TextUtils;
 import android.content.Context;
 import android.content.SharedPreferences;
 
@@ -28,6 +33,7 @@ public final class ZaStoPrivacy {
     public static final String KEY_GHOST_NO_STORIES = "GHOST_NO_STORIES";
     public static final String KEY_GHOST_NO_ONLINE = "GHOST_NO_ONLINE";
     public static final String KEY_GHOST_NO_TYPING = "GHOST_NO_TYPING";
+    public static final String KEY_LOCAL_PREMIUM_EMOJI = "LOCAL_PREMIUM_EMOJI";
 
     /** Keep messages that the remote side deletes (anti-delete), marked instead of removed. */
     public static boolean KEEP_DELETED = true;
@@ -68,6 +74,12 @@ public final class ZaStoPrivacy {
     /** Ghost mode: do not send "typing", recording and uploading actions. */
     public static boolean GHOST_NO_TYPING = false;
 
+    /**
+     * Any animated emoji without Premium. They stay on this device: the server
+     * gets the plain text without them (see {@link #wireEntities}).
+     */
+    public static boolean LOCAL_PREMIUM_EMOJI = true;
+
     /** Hide the built-in "All Chats" tab when at least one custom chat folder exists. */
     public static boolean HIDE_ALL_CHATS = false;
 
@@ -96,6 +108,7 @@ public final class ZaStoPrivacy {
             GHOST_NO_STORIES = p.getBoolean(KEY_GHOST_NO_STORIES, false);
             GHOST_NO_ONLINE = p.getBoolean(KEY_GHOST_NO_ONLINE, false);
             GHOST_NO_TYPING = p.getBoolean(KEY_GHOST_NO_TYPING, false);
+            LOCAL_PREMIUM_EMOJI = p.getBoolean(KEY_LOCAL_PREMIUM_EMOJI, true);
         } catch (Exception ignore) {
         }
     }
@@ -115,6 +128,7 @@ public final class ZaStoPrivacy {
             case KEY_GHOST_NO_STORIES: return GHOST_NO_STORIES;
             case KEY_GHOST_NO_ONLINE: return GHOST_NO_ONLINE;
             case KEY_GHOST_NO_TYPING: return GHOST_NO_TYPING;
+            case KEY_LOCAL_PREMIUM_EMOJI: return LOCAL_PREMIUM_EMOJI;
         }
         return false;
     }
@@ -134,12 +148,96 @@ public final class ZaStoPrivacy {
             case KEY_GHOST_NO_STORIES: GHOST_NO_STORIES = value; break;
             case KEY_GHOST_NO_ONLINE: GHOST_NO_ONLINE = value; break;
             case KEY_GHOST_NO_TYPING: GHOST_NO_TYPING = value; break;
+            case KEY_LOCAL_PREMIUM_EMOJI: LOCAL_PREMIUM_EMOJI = value; break;
             default: return;
         }
         try {
             prefs().edit().putBoolean(key, value).apply();
         } catch (Exception ignore) {
         }
+    }
+
+    private static boolean canSendCustomEmoji(int account, long dialogId, long documentId) {
+        TLRPC.Document document = AnimatedEmojiDrawable.findDocument(account, documentId);
+        if (MessageObject.isFreeEmoji(document)) {
+            return true;
+        }
+        TLRPC.ChatFull chatFull = MessagesController.getInstance(account).getChatFull(-dialogId);
+        if (chatFull != null && chatFull.emojiset != null) {
+            TLRPC.TL_messages_stickerSet set = MediaDataController.getInstance(account).getGroupStickerSetById(chatFull.emojiset);
+            if (set != null && set.documents != null) {
+                for (int a = 0; a < set.documents.size(); a++) {
+                    if (set.documents.get(a).id == documentId) {
+                        return true;
+                    }
+                }
+            }
+        }
+        return false;
+    }
+
+    /**
+     * Entities for the server: custom emoji that a non-Premium account may not
+     * send are dropped. The local message keeps the full list.
+     */
+    public static ArrayList<TLRPC.MessageEntity> wireEntities(int account, long dialogId, ArrayList<TLRPC.MessageEntity> entities) {
+        if (!LOCAL_PREMIUM_EMOJI || entities == null || entities.isEmpty()
+                || UserConfig.getInstance(account).isPremium()
+                || dialogId == UserConfig.getInstance(account).getClientUserId()) {
+            return entities;
+        }
+        ArrayList<TLRPC.MessageEntity> result = null;
+        for (int a = 0; a < entities.size(); a++) {
+            TLRPC.MessageEntity entity = entities.get(a);
+            if (entity instanceof TLRPC.TL_messageEntityCustomEmoji
+                    && !canSendCustomEmoji(account, dialogId, ((TLRPC.TL_messageEntityCustomEmoji) entity).document_id)) {
+                if (result == null) {
+                    result = new ArrayList<>(entities.subList(0, a));
+                }
+                continue;
+            }
+            if (result != null) {
+                result.add(entity);
+            }
+        }
+        return result != null ? result : entities;
+    }
+
+    /**
+     * The server's reply comes without the custom emoji it never received.
+     * Put the local ones back when the reply is the same text we sent.
+     */
+    public static ArrayList<TLRPC.MessageEntity> keepLocalEmoji(int account, TLRPC.Message local, String receivedText, ArrayList<TLRPC.MessageEntity> received) {
+        if (!LOCAL_PREMIUM_EMOJI || local == null || local.entities == null || local.entities.isEmpty()
+                || UserConfig.getInstance(account).isPremium()
+                || !TextUtils.equals(local.message, receivedText)) {
+            return received;
+        }
+        ArrayList<TLRPC.MessageEntity> result = received != null ? new ArrayList<>(received) : new ArrayList<>();
+        boolean added = false;
+        for (int a = 0; a < local.entities.size(); a++) {
+            TLRPC.MessageEntity entity = local.entities.get(a);
+            if (!(entity instanceof TLRPC.TL_messageEntityCustomEmoji)) {
+                continue;
+            }
+            boolean same = false;
+            for (int b = 0; b < result.size(); b++) {
+                TLRPC.MessageEntity other = result.get(b);
+                if (other instanceof TLRPC.TL_messageEntityCustomEmoji && other.offset == entity.offset && other.length == entity.length) {
+                    same = true;
+                    break;
+                }
+            }
+            if (!same) {
+                result.add(entity);
+                added = true;
+            }
+        }
+        if (!added) {
+            return received;
+        }
+        Collections.sort(result, (x, y) -> x.offset != y.offset ? Integer.compare(x.offset, y.offset) : Integer.compare(y.length, x.length));
+        return result;
     }
 
     private ZaStoPrivacy() {

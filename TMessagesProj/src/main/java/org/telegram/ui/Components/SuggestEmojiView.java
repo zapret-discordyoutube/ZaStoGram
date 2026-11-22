@@ -38,6 +38,7 @@ import org.telegram.messenger.NotificationCenter;
 import org.telegram.messenger.R;
 import org.telegram.messenger.SharedConfig;
 import org.telegram.messenger.UserConfig;
+import org.telegram.messenger.ZaStoPrivacy;
 import org.telegram.messenger.UserObject;
 import org.telegram.tgnet.TLRPC;
 import org.telegram.ui.ActionBar.BaseFragment;
@@ -441,7 +442,7 @@ public class SuggestEmojiView extends FrameLayout implements NotificationCenter.
         }
         CharSequence text = enterView.getFieldText();
         Emoji.EmojiSpan[] emojiSpans = (text instanceof Spanned) ? ((Spanned) text).getSpans(Math.max(0, selectionEnd - 24), selectionEnd, Emoji.EmojiSpan.class) : null;
-        if (emojiSpans != null && emojiSpans.length > 0 && SharedConfig.suggestAnimatedEmoji && UserConfig.getInstance(currentAccount).isPremium()) {
+        if (emojiSpans != null && emojiSpans.length > 0 && SharedConfig.suggestAnimatedEmoji && (UserConfig.getInstance(currentAccount).isPremium() || ZaStoPrivacy.LOCAL_PREMIUM_EMOJI && enterView != null)) {
             Emoji.EmojiSpan lastEmoji = emojiSpans[emojiSpans.length - 1];
             if (lastEmoji != null) {
                 int emojiStart = ((Spanned) text).getSpanStart(lastEmoji);
@@ -573,7 +574,7 @@ public class SuggestEmojiView extends FrameLayout implements NotificationCenter.
                         clear = true;
                         forceClose();
                     }
-                }, SharedConfig.suggestAnimatedEmoji && UserConfig.getInstance(currentAccount).isPremium());
+                }, SharedConfig.suggestAnimatedEmoji && (UserConfig.getInstance(currentAccount).isPremium() || ZaStoPrivacy.LOCAL_PREMIUM_EMOJI && enterView != null));
 //            };
 //            Runnable serverSearch = () -> {
 //                if (ConnectionsManager.getInstance(currentAccount).getConnectionState() != ConnectionsManager.ConnectionStateConnected) {
