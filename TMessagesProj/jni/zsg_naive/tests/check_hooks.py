@@ -21,6 +21,7 @@ HOOKS = {
         "tgnet::naive::CreateFor(*proxyAddress, proxyPort,",
         'std::strcmp(currentWssTransport->transportName(), "naive") == 0',
     ],
+    JNI / "tgnet/wss/WssSocket.cpp": ["zsg_ws_new(&config", "zsg_ws_send(client", 'config.subprotocol = "binary"'],
     JNI / "mtproxy/MtProxyOptions.h": ["bool naive = false;", "naive == other.naive", "normalized.naive = options.naive;"],
     JNI / "TgNetWrapper.cpp": ["jclass_MtProxyOptions_naive", '"naive", "Z"'],
     JAVA / "tgnet/MtProxyOptions.java": ["public final boolean naive;", "public static MtProxyOptions naive()"],
