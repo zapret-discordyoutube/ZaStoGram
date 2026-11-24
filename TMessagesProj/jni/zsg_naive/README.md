@@ -29,7 +29,10 @@ the wire. The protocol work (TLS handshake, HTTP/2, preamble, CONNECT, padding) 
   against a TLS WebSocket echo server, including the "first frame is at least 64 bytes" rule and fail-closed
   certificate checking. The lab servers and captures live in `~/zastogram/naive-ref-lab`.
 
-## Sources needed to build (not committed yet)
-`core/` = naive-core checkout, `third_party/boringssl/` = BoringSSL `ea9f3a34c3977144c45d272be81842fd891a0bdb`
-(Chromium 158.0.8127.88). They are expected as git submodules once naive-core is hosted; until then link or copy them
-here, or pass `-DZSG_NAIVE_CORE_DIR=... -DZSG_BORINGSSL_DIR=...`.
+## Sources needed to build (git submodules)
+- `core/` — **naive-core**, the sans-I/O protocol library (private repo `zastogram/naive-core`). It is a private
+  submodule on purpose: clone access needs a Forgejo account with access to that repo, so a plain public clone (and
+  the push-triggered Actions build) cannot fetch it. Local release builds work because the build host has the access.
+- `third_party/boringssl/` — BoringSSL `ea9f3a34c3977144c45d272be81842fd891a0bdb` (Chromium 158.0.8127.88), public.
+  Separate from the app's own older `jni/third_party/boringssl`, which stays untouched.
+After a fresh clone: `git submodule update --init TMessagesProj/jni/zsg_naive/core TMessagesProj/jni/zsg_naive/third_party/boringssl`.

@@ -62,3 +62,9 @@
 [submodule "TMessagesProj/jni/twidget/widget-sandbox"]
 	path = TMessagesProj/jni/twidget/widget-sandbox
 	url = https://github.com/TelegramMessenger/widget-sandbox.git
+[submodule "TMessagesProj/jni/zsg_naive/core"]
+	path = TMessagesProj/jni/zsg_naive/core
+	url = https://git.zapret.moe/zastogram/naive-core.git
+[submodule "TMessagesProj/jni/zsg_naive/third_party/boringssl"]
+	path = TMessagesProj/jni/zsg_naive/third_party/boringssl
+	url = https://github.com/google/boringssl.git
