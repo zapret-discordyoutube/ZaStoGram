@@ -27,6 +27,7 @@ HOOKS = {
     JAVA / "tgnet/MtProxyOptions.java": ["public final boolean naive;", "public static MtProxyOptions naive()"],
     JAVA / "tgnet/ConnectionsManager.java": ["MtProxyOptions.naive()", "MtProxyOptions.naive(), activationGeneration"],
     JAVA / "proxy/ProxySettings.java": ["NAIVE", "case NAIVE:", "Type.NAIVE"],
+    JAVA / "proxy/ProxyWssFallback.java": ["getType() != ProxySettings.Type.NAIVE"],
     JAVA / "messenger/ProxyLinkHelper.java": ["TYPE_NAIVE", "ProxySettings.Type.NAIVE"],
     JAVA / "ui/ProxySettingsActivity.java": ["TYPE_NAIVE", "R.string.UseProxyNaive"],
     RES / "values/strings.xml": ['name="UseProxyNaive"', 'name="UseProxyNaiveInfo"'],

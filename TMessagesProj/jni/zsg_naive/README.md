@@ -20,7 +20,7 @@ the wire. The protocol work (TLS handshake, HTTP/2, preamble, CONNECT, padding) 
    `OfficialRoute(...)`; the `useNaive ? tgnet::naive::CreateFor(...) : tgnet::wss::CreateSocket(...)` creation; the
    `"naive"` guard on the pooled-socket lookup.
 3. `jni/mtproxy/MtProxyOptions.h` (+ `jni/TgNetWrapper.cpp`, `tgnet/MtProxyOptions.java`): the `naive` flag.
-4. Java: `ProxySettings.Type.NAIVE` and its handling in `ConnectionsManager.setProxySettings`.
+4. Java: `ProxySettings.Type.NAIVE` and its handling in `ConnectionsManager.setProxySettings`; `ProxyWssFallback.isAllowed()` excludes NAIVE (a Naive entry fails closed, never falls back to a direct WSS route).
 
 ## Tests
 - `tests/check_hooks.py` — the hook lines above are all present.

@@ -93,7 +93,9 @@ public final class ProxyWssFallback {
                 && SharedConfig.isProxyEnabled()
                 && SharedConfig.currentProxy != null
                 && SharedConfig.currentProxy.settings != null
-                && SharedConfig.currentProxy.settings.isValid();
+                && SharedConfig.currentProxy.settings.isValid()
+                // A Naive entry fails closed: it never falls back to a direct WSS route that would show the user's own address.
+                && SharedConfig.currentProxy.settings.getType() != ProxySettings.Type.NAIVE;
     }
 
     private static void engage() {
