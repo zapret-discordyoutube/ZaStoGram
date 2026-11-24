@@ -27,6 +27,8 @@ HOOKS = {
     JAVA / "tgnet/MtProxyOptions.java": ["public final boolean naive;", "public static MtProxyOptions naive()"],
     JAVA / "tgnet/ConnectionsManager.java": ["MtProxyOptions.naive()", "MtProxyOptions.naive(), activationGeneration"],
     JAVA / "proxy/ProxySettings.java": ["NAIVE", "case NAIVE:", "Type.NAIVE"],
+    # not a Naive hook: the 13.2.1 upstream merge dropped this line and left the proxy screen blank (restored 2026-11-25)
+    JAVA / "ui/ProxySettingsActivity.java": ["scrollView.addView(linearLayout2, new ScrollView.LayoutParams("],
     JAVA / "proxy/ProxyWssFallback.java": ["getType() != ProxySettings.Type.NAIVE"],
     JAVA / "messenger/ProxyLinkHelper.java": ["TYPE_NAIVE", "ProxySettings.Type.NAIVE"],
     JAVA / "ui/ProxySettingsActivity.java": ["TYPE_NAIVE", "R.string.UseProxyNaive"],

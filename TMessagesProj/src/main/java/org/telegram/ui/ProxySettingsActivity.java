@@ -302,6 +302,7 @@ public class ProxySettingsActivity extends BaseFragment {
         frameLayout.addView(scrollView, LayoutHelper.createFrame(LayoutHelper.MATCH_PARENT, LayoutHelper.MATCH_PARENT));
 
         linearLayout2.setOrientation(LinearLayout.VERTICAL);
+        scrollView.addView(linearLayout2, new ScrollView.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
 
         final View.OnClickListener typeCellClickListener = view -> setProxyType((Integer) view.getTag(), true);
 
