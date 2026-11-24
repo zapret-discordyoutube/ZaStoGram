@@ -19,6 +19,7 @@ the wire. The protocol work (TLS handshake, HTTP/2, preamble, CONNECT, padding) 
 2. `jni/tgnet/ConnectionSocket.cpp`: `#include "../zsg_naive/NaiveSocket.h"`; the `useNaive` block after
    `OfficialRoute(...)`; the `useNaive ? tgnet::naive::CreateFor(...) : tgnet::wss::CreateSocket(...)` creation; the
    `"naive"` guard on the pooled-socket lookup.
+2b. `jni/tgnet/Connection.cpp`: in `Connection::connect`, a Naive route forces `ipv6 = 0` (the server's egress family is unknown; an IPv4-only server cannot reach Telegram's IPv6 addresses).
 3. `jni/mtproxy/MtProxyOptions.h` (+ `jni/TgNetWrapper.cpp`, `tgnet/MtProxyOptions.java`): the `naive` flag.
 4. Java: `ProxySettings.Type.NAIVE` and its handling in `ConnectionsManager.setProxySettings`; `ProxyWssFallback.isAllowed()` excludes NAIVE (a Naive entry fails closed, never falls back to a direct WSS route).
 

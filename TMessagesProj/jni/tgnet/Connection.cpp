@@ -415,6 +415,14 @@ void Connection::connect() {
     } else {
         ipv6 = 0;
     }
+    // ZaStoGram Naive (jni/zsg_naive/README.md): the Naive server's egress family is unknown and many have no IPv6,
+    // so a Naive route asks it for Telegram's IPv4 addresses only.
+    if (!overrideProxyAddress.empty()
+            ? overrideMtProxyOptions.naive
+            : (ConnectionsManager::getInstance(currentDatacenter->instanceNum).proxyMtProxyOptions.naive
+                    && !ConnectionsManager::getInstance(currentDatacenter->instanceNum).proxyAddress.empty())) {
+        ipv6 = 0;
+    }
     uint32_t isStatic = connectionType == ConnectionTypeProxy || !ConnectionsManager::getInstance(currentDatacenter->instanceNum).proxyAddress.empty() ? TcpAddressFlagStatic : 0;
     TcpAddress *tcpAddress = nullptr;
     if (isMediaConnectionType(connectionType)) {
