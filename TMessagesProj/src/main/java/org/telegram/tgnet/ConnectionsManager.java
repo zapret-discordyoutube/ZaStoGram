@@ -960,7 +960,10 @@ public class ConnectionsManager extends BaseController {
         final boolean legacyProxyEnabled = preferences.getBoolean("proxy_enabled", false) && proxySettings.isValid();
         if (legacyProxyEnabled) {
             int activationGeneration = ProxyRuntimeStateStore.noteProxyStartupRestoreActivation(currentAccount);
-            if (proxySettings.getType() == ProxySettings.Type.WEB) {
+            if (proxySettings.getType() == ProxySettings.Type.NAIVE) {
+                // ZaStoGram Naive proxy (jni/zsg_naive): no MTProxy stealth modes, the native side carries the connection.
+                native_setProxySettings(currentAccount, proxyAddress, proxyPort, proxyUsername, proxyPassword, "", MtProxyOptions.naive(), activationGeneration, ProxyConnectionEvent.Origin.STARTUP_RESTORE.wireName);
+            } else if (proxySettings.getType() == ProxySettings.Type.WEB) {
                 // WEB proxy: the browser bridge carries a plain MTProxy stream, so the
                 // native side must see an ordinary obfuscated2 proxy on loopback with
                 // the proxy's own secret and every ZaStoGram stealth mode disabled;
@@ -1160,6 +1163,9 @@ public class ConnectionsManager extends BaseController {
         String username = settings.getUser();
         String password = settings.getPassword();
         String secret = settings.getSecret();
+        if (settings.getType() == ProxySettings.Type.NAIVE) {
+            return native_checkProxy(currentAccount, address, port, username, password, "", MtProxyOptions.naive(), requestTimeDelegate);  // ZaStoGram Naive proxy
+        }
         return native_checkProxy(currentAccount, address, port, username, password, secret, MtProxyOptions.resolve(address, port, secret), requestTimeDelegate);
     }
 
@@ -1688,6 +1694,9 @@ public class ConnectionsManager extends BaseController {
         // webBridge() also keeps loopback connects out of the MTProxy dial
         // queue, endpoint cooldown and reconnect backoff.
         MtProxyOptions enabledOptions = !hasSelectedProxy ? MtProxyOptions.disabled() : webProxy ? MtProxyOptions.webBridge() : MtProxyOptions.resolve(address, port, secret);
+        if (hasSelectedProxy && settings != null && settings.getType() == ProxySettings.Type.NAIVE) {
+            enabledOptions = MtProxyOptions.naive();  // ZaStoGram Naive proxy (jni/zsg_naive)
+        }
         for (int a = 0; a < UserConfig.MAX_ACCOUNT_COUNT; a++) {
             if (hasSelectedProxy) {
                 native_setProxySettings(a, address, port, username, password, secret, enabledOptions, activationGeneration, activationOrigin.wireName);

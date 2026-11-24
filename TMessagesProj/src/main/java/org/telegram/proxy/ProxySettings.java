@@ -27,7 +27,10 @@ public final class ProxySettings {
     public enum Type {
         SOCKS5,
         MTPROTO,
-        WEB
+        WEB,
+        // ZaStoGram: NaiveProxy-compatible server (HTTPS CONNECT, Chrome 158 handshake); user and password are its
+        // proxy credentials. Implemented by the jni/zsg_naive module.
+        NAIVE
     }
 
     private final @NonNull Type type;
@@ -51,9 +54,9 @@ public final class ProxySettings {
             port = builder.port;
             user = "";
             password = "";
-        } else if (type == Type.SOCKS5) {
+        } else if (type == Type.SOCKS5 || type == Type.NAIVE) {
             secret = "";
-            port = builder.port;
+            port = type == Type.NAIVE && builder.port == 0 ? 443 : builder.port;
             user = builder.user;
             password = builder.password;
         } else {
@@ -107,6 +110,9 @@ public final class ProxySettings {
                 break;
             case WEB:
                 url = new StringBuilder("https://t.me/webproxy?");
+                break;
+            case NAIVE:
+                url = new StringBuilder("https://t.me/naive?");
                 break;
             case SOCKS5:
             default:
@@ -186,6 +192,7 @@ public final class ProxySettings {
         editor.putInt("proxy_type", ProxySettings.typeToInt(type));
         editor.putString("proxy_ip", address);
         switch (type) {
+            case NAIVE:
             case SOCKS5:
                 editor.putInt("proxy_port", port);
                 editor.remove("proxy_secret");
@@ -250,6 +257,8 @@ public final class ProxySettings {
                     type = Type.MTPROTO;
                 } else if (path.startsWith("/webproxy")) {
                     type = Type.WEB;
+                } else if (path.startsWith("/naive")) {
+                    type = Type.NAIVE;
                 } else {
                     return null;
                 }
@@ -262,6 +271,8 @@ public final class ProxySettings {
                     type = Type.MTPROTO;
                 } else if (url.startsWith("tg://webproxy") || url.startsWith("tg:webproxy")) {
                     type = Type.WEB;
+                } else if (url.startsWith("tg://naive") || url.startsWith("tg:naive")) {
+                    type = Type.NAIVE;
                 } else {
                     return null;
                 }
@@ -538,6 +549,8 @@ public final class ProxySettings {
                 return 1;
             case WEB:
                 return 2;
+            case NAIVE:
+                return 3;
         }
         return 0;
     }
@@ -550,6 +563,8 @@ public final class ProxySettings {
                 return Type.MTPROTO;
             case 2:
                 return Type.WEB;
+            case 3:
+                return Type.NAIVE;
         }
         return Type.SOCKS5;
     }

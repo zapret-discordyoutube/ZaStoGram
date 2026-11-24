@@ -24,6 +24,7 @@ public final class ProxyLinkHelper {
     public static final int TYPE_SOCKS5 = 0;
     public static final int TYPE_MTPROTO = 1;
     public static final int TYPE_WEB = 2;
+    public static final int TYPE_NAIVE = 3;
 
     private static final LinkPrefix[] LINK_PREFIXES = new LinkPrefix[] {
             new LinkPrefix(TYPE_SOCKS5, "t.me/socks?"),
@@ -47,6 +48,13 @@ public final class ProxyLinkHelper {
             new LinkPrefix(TYPE_WEB, "tg://webproxy/?"),
             new LinkPrefix(TYPE_WEB, "tg:webproxy?"),
             new LinkPrefix(TYPE_WEB, "tg:webproxy/?"),
+            new LinkPrefix(TYPE_NAIVE, "t.me/naive?"),
+            new LinkPrefix(TYPE_NAIVE, "telegram.me/naive?"),
+            new LinkPrefix(TYPE_NAIVE, "telegram.dog/naive?"),
+            new LinkPrefix(TYPE_NAIVE, "tg://naive?"),
+            new LinkPrefix(TYPE_NAIVE, "tg://naive/?"),
+            new LinkPrefix(TYPE_NAIVE, "tg:naive?"),
+            new LinkPrefix(TYPE_NAIVE, "tg:naive/?"),
     };
 
     private ProxyLinkHelper() {
@@ -58,6 +66,8 @@ public final class ProxyLinkHelper {
                 return ProxySettings.Type.MTPROTO;
             case TYPE_WEB:
                 return ProxySettings.Type.WEB;
+            case TYPE_NAIVE:
+                return ProxySettings.Type.NAIVE;
             case TYPE_SOCKS5:
             default:
                 return ProxySettings.Type.SOCKS5;
@@ -69,6 +79,8 @@ public final class ProxyLinkHelper {
             return TYPE_MTPROTO;
         } else if (type == ProxySettings.Type.WEB) {
             return TYPE_WEB;
+        } else if (type == ProxySettings.Type.NAIVE) {
+            return TYPE_NAIVE;
         }
         return TYPE_SOCKS5;
     }
@@ -166,12 +178,12 @@ public final class ProxyLinkHelper {
                     portString = value;
                     break;
                 case "user":
-                    if (type == TYPE_SOCKS5) {
+                    if (type == TYPE_SOCKS5 || type == TYPE_NAIVE) {
                         username = value;
                     }
                     break;
                 case "pass":
-                    if (type == TYPE_SOCKS5) {
+                    if (type == TYPE_SOCKS5 || type == TYPE_NAIVE) {
                         password = value;
                     }
                     break;

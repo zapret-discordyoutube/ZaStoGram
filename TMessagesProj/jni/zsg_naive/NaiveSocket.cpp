@@ -217,6 +217,30 @@ bool Socket::write(const uint8_t *data, uint32_t size, std::string *diagnostic) 
     return pump(diagnostic);
 }
 
+wss::Route RouteFor(const std::string &proxyHost, uint16_t proxyPort) {
+    wss::Route route;
+    route.relayHost = proxyHost;
+    route.connectHost = proxyHost;
+    route.relayPort = proxyPort;
+    route.domain = proxyHost;
+    route.healthDomain = proxyHost;
+    return route;
+}
+
+std::unique_ptr<transport::Socket> CreateFor(const std::string &proxyHost, uint16_t proxyPort, const std::string &user,
+                                             const std::string &password, const std::string &dcAddress, uint16_t dcPort) {
+    Config config;
+    config.proxyHost = proxyHost;
+    config.proxyPort = proxyPort;
+    config.user = user;
+    config.password = password;
+    config.targetHost = dcAddress;
+    config.targetPort = dcPort;
+    // Android 14 moved the system roots into the conscrypt APEX; older releases keep them in /system.
+    config.caDir = "/apex/com.android.conscrypt/cacerts:/system/etc/security/cacerts";
+    return CreateSocket(std::move(config));
+}
+
 std::unique_ptr<transport::Socket> CreateSocket(Config config) {
     return std::unique_ptr<transport::Socket>(new Socket(std::move(config)));
 }

@@ -87,6 +87,7 @@ public class ProxySettingsActivity extends BaseFragment {
     private final static int TYPE_SOCKS5 = ProxyLinkHelper.TYPE_SOCKS5;
     private final static int TYPE_MTPROTO = ProxyLinkHelper.TYPE_MTPROTO;
     private final static int TYPE_WEB = ProxyLinkHelper.TYPE_WEB;
+    private final static int TYPE_NAIVE = ProxyLinkHelper.TYPE_NAIVE;
 
     private final static int FIELD_IP = 0;
     private final static int FIELD_PORT = 1;
@@ -104,7 +105,7 @@ public class ProxySettingsActivity extends BaseFragment {
     private TextSettingsCell shareCell;
     private TextSettingsCell pasteCell;
     private SimpleActionBarDoneButton doneItem;
-    private RadioCell[] typeCell = new RadioCell[3];
+    private RadioCell[] typeCell = new RadioCell[4];
     private EditTextBoldCursor quickProxyLinkField;
     private int currentType = -1;
     private int initialType = -1;
@@ -241,9 +242,9 @@ public class ProxySettingsActivity extends BaseFragment {
                             .setType(ProxyLinkHelper.toSettingsType(currentType))
                             .setAddress(address)
                             .setPort(currentType == TYPE_WEB ? 0 : Utilities.parseInt(inputFields[FIELD_PORT].getText().toString()))
-                            .setUser(currentType == TYPE_SOCKS5 ? inputFields[FIELD_USER].getText().toString() : "")
-                            .setPassword(currentType == TYPE_SOCKS5 ? inputFields[FIELD_PASSWORD].getText().toString() : "")
-                            .setSecret(currentType != TYPE_SOCKS5 ? inputFields[FIELD_SECRET].getText().toString() : "")
+                            .setUser(currentType == TYPE_SOCKS5 || currentType == TYPE_NAIVE ? inputFields[FIELD_USER].getText().toString() : "")
+                            .setPassword(currentType == TYPE_SOCKS5 || currentType == TYPE_NAIVE ? inputFields[FIELD_PASSWORD].getText().toString() : "")
+                            .setSecret(currentType == TYPE_MTPROTO || currentType == TYPE_WEB ? inputFields[FIELD_SECRET].getText().toString() : "")
                             .build();
 
                     SharedPreferences preferences = MessagesController.getGlobalMainSettings();
@@ -313,7 +314,9 @@ public class ProxySettingsActivity extends BaseFragment {
             } else if (a == TYPE_MTPROTO) {
                 typeCell[a].setText(LocaleController.getString(R.string.UseProxyTelegram), a == currentType, true);
             } else if (a == TYPE_WEB) {
-                typeCell[a].setText(LocaleController.getString(R.string.UseProxyWeb), a == currentType, false);
+                typeCell[a].setText(LocaleController.getString(R.string.UseProxyWeb), a == currentType, true);
+            } else if (a == TYPE_NAIVE) {
+                typeCell[a].setText(LocaleController.getString(R.string.UseProxyNaive), a == currentType, false);
             }
             linearLayout2.addView(typeCell[a], LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, 50));
             typeCell[a].setOnClickListener(typeCellClickListener);
@@ -607,7 +610,7 @@ public class ProxySettingsActivity extends BaseFragment {
                     }
                     params.append("secret=").append(URLEncoder.encode(secret, "UTF-8"));
                 } else {
-                    url = "https://t.me/socks?";
+                    url = currentType == TYPE_NAIVE ? "https://t.me/naive?" : "https://t.me/socks?";
                     if (!TextUtils.isEmpty(user)) {
                         if (params.length() != 0) {
                             params.append("&");
@@ -677,11 +680,11 @@ public class ProxySettingsActivity extends BaseFragment {
             case FIELD_PORT:
                 return proxyLink.port > 0 ? String.valueOf(proxyLink.port) : "";
             case FIELD_USER:
-                return proxyLink.type == TYPE_SOCKS5 ? proxyLink.username : "";
+                return proxyLink.type == TYPE_SOCKS5 || proxyLink.type == TYPE_NAIVE ? proxyLink.username : "";
             case FIELD_PASSWORD:
-                return proxyLink.type == TYPE_SOCKS5 ? proxyLink.password : "";
+                return proxyLink.type == TYPE_SOCKS5 || proxyLink.type == TYPE_NAIVE ? proxyLink.password : "";
             case FIELD_SECRET:
-                return proxyLink.type != TYPE_SOCKS5 ? proxyLink.secret : "";
+                return proxyLink.type == TYPE_MTPROTO || proxyLink.type == TYPE_WEB ? proxyLink.secret : "";
         }
         return "";
     }
@@ -830,6 +833,16 @@ public class ProxySettingsActivity extends BaseFragment {
                 ((View) inputFields[FIELD_SECRET].getParent()).setVisibility(View.VISIBLE);
                 ((View) inputFields[FIELD_PASSWORD].getParent()).setVisibility(View.GONE);
                 ((View) inputFields[FIELD_USER].getParent()).setVisibility(View.GONE);
+            } else if (currentType == TYPE_NAIVE) {
+                if (inputFields[FIELD_PORT].length() == 0) {
+                    inputFields[FIELD_PORT].setText("443");
+                }
+                bottomCells[0].setVisibility(View.GONE);
+                bottomCells[1].setVisibility(View.VISIBLE);
+                bottomCells[1].setText(LocaleController.getString(R.string.UseProxyNaiveInfo));
+                ((View) inputFields[FIELD_SECRET].getParent()).setVisibility(View.GONE);
+                ((View) inputFields[FIELD_PASSWORD].getParent()).setVisibility(View.VISIBLE);
+                ((View) inputFields[FIELD_USER].getParent()).setVisibility(View.VISIBLE);
             } else if (currentType == TYPE_WEB) {
                 bottomCells[0].setVisibility(View.GONE);
                 bottomCells[1].setVisibility(View.VISIBLE);

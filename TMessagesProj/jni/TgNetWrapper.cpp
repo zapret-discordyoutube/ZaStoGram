@@ -32,6 +32,7 @@ jfieldID jclass_MtProxyOptions_recordSizingMode;
 jfieldID jclass_MtProxyOptions_timingMode;
 jfieldID jclass_MtProxyOptions_startupCoverMode;
 jfieldID jclass_MtProxyOptions_webBridge;
+jfieldID jclass_MtProxyOptions_naive;
 
 jclass jclass_ConnectionsManager;
 jmethodID jclass_ConnectionsManager_onRequestClear;
@@ -74,6 +75,7 @@ static MtProxyOptions readMtProxyOptions(JNIEnv *env, jobject options) {
     nativeOptions.timingMode = (int32_t) env->GetIntField(options, jclass_MtProxyOptions_timingMode);
     nativeOptions.startupCoverMode = (int32_t) env->GetIntField(options, jclass_MtProxyOptions_startupCoverMode);
     nativeOptions.webBridge = env->GetBooleanField(options, jclass_MtProxyOptions_webBridge) == JNI_TRUE;
+    nativeOptions.naive = env->GetBooleanField(options, jclass_MtProxyOptions_naive) == JNI_TRUE;
     return normalizeMtProxyOptions(nativeOptions);
 }
 
@@ -831,6 +833,10 @@ extern "C" int registerNativeTgNetFunctions(JavaVM *vm, JNIEnv *env) {
     }
     jclass_MtProxyOptions_webBridge = env->GetFieldID(jclass_MtProxyOptions, "webBridge", "Z");
     if (jclass_MtProxyOptions_webBridge == 0) {
+        return JNI_FALSE;
+    }
+    jclass_MtProxyOptions_naive = env->GetFieldID(jclass_MtProxyOptions, "naive", "Z");
+    if (jclass_MtProxyOptions_naive == 0) {
         return JNI_FALSE;
     }
 

@@ -36,6 +36,7 @@
 #include "Defines.h"
 #include "ConnectionsManager.h"
 #include "EventObject.h"
+#include "../zsg_naive/NaiveSocket.h"
 #include "NativeByteBuffer.h"
 #include "Timer.h"
 #include "BuffersStorage.h"
@@ -3517,6 +3518,13 @@ void ConnectionSocket::openConnection(std::string address, uint16_t port, std::s
             address,
             &selectedWssRoute);
 
+    // ZaStoGram Naive (jni/zsg_naive/README.md): a Naive proxy entry takes the WSS transport slot.
+    const bool useNaive = proxyOptions.naive && !proxyAddress->empty();
+    if (useNaive) {
+        selectedWssRoute = tgnet::naive::RouteFor(*proxyAddress, proxyPort);
+        shouldUseWss = true;
+    }
+
     finishDirectStep(0);
     if (shouldUseWss && selectedWssRoute.direct) {
         // Every WSS step is paused and direct TCP is not: one guarded try at
@@ -3548,7 +3556,12 @@ void ConnectionSocket::openConnection(std::string address, uint16_t port, std::s
         currentSecretKind = "wss";
         setProxyAuthState(0, "wss_setup");
         currentWssRoute = selectedWssRoute;
-        currentWssTransport = tgnet::wss::CreateSocket(currentWssRoute);
+        currentWssTransport = useNaive
+                ? tgnet::naive::CreateFor(*proxyAddress, proxyPort,
+                        overrideProxyAddress.empty() ? manager.proxyUser : overrideProxyUser,
+                        overrideProxyAddress.empty() ? manager.proxyPassword : overrideProxyPassword,
+                        address, port)
+                : tgnet::wss::CreateSocket(currentWssRoute);
         const std::string &wssConnectHost = currentWssRoute.connectHost;
         uint16_t wssConnectPort = currentWssRoute.relayPort;
         socketAddress.sin_family = AF_INET;
@@ -3912,7 +3925,7 @@ void ConnectionSocket::openConnectionInternal(bool ipv6) {
         const socklen_t addressLength = ipv6 ? sizeof(socketAddress6) : sizeof(socketAddress);
         // A spare from the pool has already done TCP, TLS and the upgrade; its
         // first EPOLLOUT below goes straight to on_connected.
-        std::unique_ptr<tgnet::wss::Socket> pooled = ipv6
+        std::unique_ptr<tgnet::wss::Socket> pooled = (ipv6 || std::strcmp(currentWssTransport->transportName(), "naive") == 0)
                 ? nullptr
                 : ConnectionsManager::getInstance(instanceNum).takePooledWssSocket(currentWssRoute);
         if (pooled != nullptr) {

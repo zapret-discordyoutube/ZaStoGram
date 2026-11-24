@@ -14,6 +14,7 @@
 #include <vector>
 
 #include "../tgnet/transport/TransportSocket.h"
+#include "../tgnet/wss/WssSocket.h"
 
 struct zsg_naive;  // opaque handle of libzsgnaive (global scope, as declared by zsg_naive.h)
 
@@ -77,6 +78,13 @@ private:
 };
 
 std::unique_ptr<transport::Socket> CreateSocket(Config config);
+
+// ---- hooks used by tgnet/ConnectionSocket.cpp (the only fork-specific lines outside this folder) ----
+// The route that makes ConnectionSocket resolve and dial the Naive server: the transport slot of WSS is reused.
+wss::Route RouteFor(const std::string &proxyHost, uint16_t proxyPort);
+// The Naive transport for one DC connection (proxy credentials come from the active proxy entry).
+std::unique_ptr<transport::Socket> CreateFor(const std::string &proxyHost, uint16_t proxyPort, const std::string &user,
+                                             const std::string &password, const std::string &dcAddress, uint16_t dcPort);
 
 } // namespace naive
 } // namespace tgnet

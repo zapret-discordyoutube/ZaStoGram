@@ -297,8 +297,12 @@ target_include_directories(tgnet PUBLIC
         openssl/include)
 target_include_directories(tgnet PRIVATE
         voip/webrtc)
+# ZaStoGram Naive transport (fork-only module, see zsg_naive/README.md)
+include(zsg_naive/zsg_naive.cmake)
+
 target_link_libraries(tgnet
         mtproxy_core
+        zsg_naive_socket
         ssl
         crypto)
 

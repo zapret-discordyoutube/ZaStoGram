@@ -66,6 +66,8 @@ struct MtProxyOptions {
     // connect gate, endpoint cooldown, reconnect backoff): the pacer exists to
     // spare a remote relay under DPI, and loopback has neither.
     bool webBridge = false;
+    // Set for a Naive proxy entry (jni/zsg_naive): the connection uses the in-process Naive client.
+    bool naive = false;
 
     bool operator==(const MtProxyOptions &other) const {
         return tlsProfile == other.tlsProfile
@@ -74,6 +76,7 @@ struct MtProxyOptions {
                && recordSizingMode == other.recordSizingMode
                && timingMode == other.timingMode
                && startupCoverMode == other.startupCoverMode
+               && naive == other.naive
                && webBridge == other.webBridge;
     }
 
@@ -140,6 +143,7 @@ static inline MtProxyOptions normalizeMtProxyOptions(const MtProxyOptions &optio
     normalized.timingMode = normalizeMtProxyTimingOption(options.timingMode);
     normalized.startupCoverMode = normalizeMtProxyStartupCoverOption(options.startupCoverMode);
     normalized.webBridge = options.webBridge;
+    normalized.naive = options.naive;
     return normalized;
 }
 
