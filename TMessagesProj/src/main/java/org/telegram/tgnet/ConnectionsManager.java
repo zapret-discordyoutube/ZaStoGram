@@ -963,6 +963,7 @@ public class ConnectionsManager extends BaseController {
             if (proxySettings.getType() == ProxySettings.Type.NAIVE) {
                 // ZaStoGram Naive proxy (jni/zsg_naive): no MTProxy stealth modes, the native side carries the connection.
                 native_setProxySettings(currentAccount, proxyAddress, proxyPort, proxyUsername, proxyPassword, "", MtProxyOptions.naive(), activationGeneration, ProxyConnectionEvent.Origin.STARTUP_RESTORE.wireName);
+                org.telegram.zastogram.naive.NaiveWebProxy.apply(proxySettings);
             } else if (proxySettings.getType() == ProxySettings.Type.WEB) {
                 // WEB proxy: the browser bridge carries a plain MTProxy stream, so the
                 // native side must see an ordinary obfuscated2 proxy on loopback with
@@ -1684,6 +1685,7 @@ public class ConnectionsManager extends BaseController {
         }
 
         boolean hasSelectedProxy = enabled && !TextUtils.isEmpty(address);
+        org.telegram.zastogram.naive.NaiveWebProxy.apply(hasSelectedProxy ? settings : null);  // ZaStoGram: WebViews through the Naive proxy
         // The WSS toggle is a preference, not a mode: a selected proxy only
         // suspends it, and turning the proxy off falls back to WSS again.
         applyWssTransport(hasSelectedProxy);

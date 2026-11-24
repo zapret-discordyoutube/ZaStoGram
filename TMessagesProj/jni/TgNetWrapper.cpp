@@ -8,6 +8,7 @@
 #include "tgnet/FileLog.h"
 #include "tgnet/Handshake.h"
 #include "mtproxy/MtProxyOptions.h"
+#include "zsg_naive/WebProxyJni.h"
 #include <openssl/rand.h>
 #include <openssl/sha.h>
 #include <openssl/bn.h>
@@ -789,6 +790,10 @@ extern "C" int registerNativeTgNetFunctions(JavaVM *vm, JNIEnv *env) {
     }
 
     if (!registerNativeMethods(env, ConnectionsManagerClassPathName, ConnectionsManagerMethods, sizeof(ConnectionsManagerMethods) / sizeof(ConnectionsManagerMethods[0]))) {
+        return JNI_FALSE;
+    }
+
+    if (!tgnet::naive::RegisterWebProxyJni(env)) {  // ZaStoGram: WebView loopback proxy through the Naive server
         return JNI_FALSE;
     }
 

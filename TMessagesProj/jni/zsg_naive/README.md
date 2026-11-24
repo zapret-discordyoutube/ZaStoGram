@@ -22,7 +22,17 @@ the wire. The protocol work (TLS handshake, HTTP/2, preamble, CONNECT, padding) 
 3. `jni/mtproxy/MtProxyOptions.h` (+ `jni/TgNetWrapper.cpp`, `tgnet/MtProxyOptions.java`): the `naive` flag.
 4. Java: `ProxySettings.Type.NAIVE` and its handling in `ConnectionsManager.setProxySettings`; `ProxyWssFallback.isAllowed()` excludes NAIVE (a Naive entry fails closed, never falls back to a direct WSS route).
 
+## WebViews (mini apps, in-app browser)
+`WebProxy.cpp` is a loopback HTTP proxy (127.0.0.1, random port) that accepts only `CONNECT` and tunnels it through the
+selected Naive server over ONE shared Naive connection; `org.telegram.zastogram.naive.NaiveWebProxy` starts it and points
+every WebView of the process at it with androidx.webkit `ProxyController` (no direct rule: fail closed). It runs only while a
+Naive entry is selected. Limits: plain http is refused; any local app can reach the loopback port (ProxyController cannot
+send credentials); a WebView without PROXY_OVERRIDE support stays direct (logged). Hooks: `ConnectionsManager.java`
+(`NaiveWebProxy.apply(...)` in `setProxySettings` and in the startup restore) and `TgNetWrapper.cpp` (`RegisterWebProxyJni`).
+
 ## Tests
+- `test/build_webproxy_host_test.sh` + `webproxy_host_test.cpp` — the REAL `WebProxy.cpp` against a real Caddy + forwardproxy:
+  one tunnel, 8 concurrent tunnels over one Naive connection, plain http refused, dead target.
 - `tests/check_hooks.py` — the hook lines above are all present.
 - `test/naive_socket_host_test.cpp` — NaiveSocket through an epoll loop against a real Caddy + forwardproxy@naive.
 - `test/build_wss_host_test.sh` + `wss_socket_host_test.cpp` — the REAL `WssSocket.cpp` (stub logger, lab trust root)
