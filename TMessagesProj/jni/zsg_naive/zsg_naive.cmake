@@ -18,7 +18,9 @@ set(ZSG_NAIVE_LIBRARY "${ZSG_NAIVE_BINARY_DIR}/libzsgnaive.so")
 ExternalProject_Add(zsg_naive_ext
         SOURCE_DIR "${ZSG_NAIVE_CORE_DIR}"
         BINARY_DIR "${ZSG_NAIVE_BINARY_DIR}"
+        CMAKE_GENERATOR "${CMAKE_GENERATOR}"
         CMAKE_ARGS
+            -DCMAKE_MAKE_PROGRAM=${CMAKE_MAKE_PROGRAM}
             -DCMAKE_TOOLCHAIN_FILE=${CMAKE_TOOLCHAIN_FILE}
             -DANDROID_ABI=${ANDROID_ABI}
             -DANDROID_PLATFORM=${ANDROID_PLATFORM}
@@ -26,6 +28,8 @@ ExternalProject_Add(zsg_naive_ext
             -DCMAKE_BUILD_TYPE=Release
             -DZSG_BORINGSSL_DIR=${ZSG_BORINGSSL_DIR}
             -DZSG_NAIVE_TOOLS=OFF
+        # Always run the nested (incremental) build: ExternalProject would otherwise never notice core changes.
+        BUILD_ALWAYS 1
         BUILD_COMMAND ${CMAKE_COMMAND} --build <BINARY_DIR> --target zsgnaive
         INSTALL_COMMAND ""
         BUILD_BYPRODUCTS "${ZSG_NAIVE_LIBRARY}")
@@ -36,6 +40,6 @@ set_target_properties(zsgnaive PROPERTIES
         INTERFACE_INCLUDE_DIRECTORIES "${ZSG_NAIVE_CORE_DIR}/include")
 add_dependencies(zsgnaive zsg_naive_ext)
 
-add_library(zsg_naive_socket STATIC ${CMAKE_CURRENT_LIST_DIR}/NaiveSocket.cpp)
+add_library(zsg_naive_socket STATIC ${CMAKE_CURRENT_LIST_DIR}/NaiveSocket.cpp ${CMAKE_CURRENT_LIST_DIR}/TrustRoots.cpp)
 target_link_libraries(zsg_naive_socket PUBLIC zsgnaive)
-target_include_directories(zsg_naive_socket PUBLIC ${CMAKE_CURRENT_LIST_DIR}/.. ${CMAKE_CURRENT_LIST_DIR}/../third_party/boringssl/include)
+target_include_directories(zsg_naive_socket PUBLIC ${CMAKE_CURRENT_LIST_DIR}/.. ${CMAKE_CURRENT_LIST_DIR}/../third_party/boringssl/include ${CMAKE_CURRENT_LIST_DIR}/../voip/webrtc)

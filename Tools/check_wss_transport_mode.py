@@ -101,10 +101,13 @@ def main() -> None:
             "WSS must be its own transport socket module")
     require("int socketFd = -1" in wss_h and "::socket(" in wss_cpp and "::connect(" in wss_cpp,
             "WSS module must own its native descriptor and TCP connect")
-    require("SSL_VERIFY_PEER" in wss_cpp and "SSL_set1_host" in wss_cpp,
-            "WSS TLS must verify the peer and hostname")
-    require("Sec-WebSocket-Protocol: binary" in wss_cpp and "Sec-WebSocket-Key" in wss_cpp,
-            "WSS module must perform a real binary WebSocket upgrade")
+    # TLS, the HTTP upgrade and WebSocket framing live in libzsgnaive (naive-core: Chrome 158 handshake, which verifies
+    # the peer and the hostname and fails closed; checked by its own tests). WSS must use it and never switch
+    # verification off.
+    require("zsg_ws_new" in wss_cpp and "insecure_skip_verify" not in wss_cpp and "SSL_" not in wss_cpp,
+            "WSS TLS must go through libzsgnaive with certificate verification on")
+    require('config.subprotocol = "binary"' in wss_cpp and "zsg_ws_send" in wss_cpp and "zsg_ws_next_message_size" in wss_cpp,
+            "WSS module must perform a real binary WebSocket upgrade (the upgrade itself is libzsgnaive's)")
     require("kws2.web.telegram.org" not in wss_cpp or '"kws2"' in wss_cpp,
             "official DC2 route must be generated inside the WSS module")
     require('prefix = "kws" + std::to_string(dcId)' in wss_cpp and '"/apiws"' in wss_cpp,
@@ -133,11 +136,13 @@ def main() -> None:
     require("if (!isCurrentTransportWss())" in socket_cpp
             and "eventMask.events |= EPOLLET" in socket_cpp,
             "WSS must stay level-triggered while TCP transports keep edge-triggered epoll")
-    require("enum class IoWait" in wss_h
-            and "SSL_ERROR_WANT_READ" in wss_cpp
-            and "SSL_ERROR_WANT_WRITE" in wss_cpp
-            and "ioWait == IoWait::Write" in wss_cpp,
-            "WSS must preserve OpenSSL read/write wait direction")
+    # The sans-I/O client never makes a write wait for a read (no WANT_READ/WANT_WRITE): the socket asks for EPOLLOUT
+    # exactly while network bytes are pending or the TCP connect is still running.
+    require("bool wantsWrite() const" in wss_h
+            and "pendingOffset < pending.size()" in wss_cpp
+            and "state == State::TcpConnecting" in wss_cpp
+            and "ioWait" not in wss_h + wss_cpp,
+            "WSS must ask for EPOLLOUT exactly while output is pending, never waiting for input to write")
     require("wss_socket tcp_connected" in wss_cpp
             and "wss_socket tls_ready" in wss_cpp
             and "wss_socket timeout" in wss_cpp,
@@ -177,10 +182,11 @@ def main() -> None:
             and "openingFrame.size() < kObfuscationHeaderSize" in wss_cpp
             and "openingFrame" in wss_h,
             "WSS must never emit a first frame shorter than the 64-byte obfuscation header")
-    require("std::deque<std::vector<uint8_t>> pendingOutput" in wss_h
-            and "pendingOutput.front()" in wss_cpp
-            and "pendingOutput.push_back(std::move(frame))" in wss_cpp,
-            "WSS TLS retries must keep immutable frame buffers during upload bursts")
+    require("std::vector<uint8_t> pending;" in wss_h
+            and "size_t pendingOffset = 0;" in wss_h
+            and "pending.insert(pending.end()" in wss_cpp
+            and "kMaxPendingOutput" in wss_cpp,
+            "WSS must queue network bytes in one bounded buffer and write them out in order during upload bursts")
     require("The relay owns the socket address" in socket_cpp
             and "ipv6 = false;" in socket_cpp,
             "WSS relay address family must not inherit the ignored DC target family")

@@ -8,11 +8,12 @@
 
 #include "../transport/TransportSocket.h"
 
-#include <openssl/ssl.h>
 #include <deque>
 #include <memory>
 #include <string>
 #include <vector>
+
+struct zsg_ws;  // opaque handle of libzsgnaive (global scope, see zsg_naive.h)
 
 namespace tgnet {
 namespace wss {
@@ -119,51 +120,33 @@ public:
 private:
     enum class State : uint8_t {
         TcpConnecting,
-        TlsHandshake,
-        HttpWrite,
-        HttpRead,
+        Handshake,  // TLS and the WebSocket upgrade, driven by libzsgnaive
         Ready,
         Closed,
     };
 
-    enum class IoWait : uint8_t {
-        None,
-        Read,
-        Write,
-    };
-
     bool finishTcpConnect(std::string *diagnostic);
-    bool startTls(std::string *diagnostic);
-    bool pumpTls(std::string *diagnostic);
-    bool queueHttpUpgrade(std::string *diagnostic);
-    bool flushPending(std::string *diagnostic);
-    bool readIntoBuffer(std::string *diagnostic);
-    bool parseHttpResponse(std::string *diagnostic);
-    bool parseFrames(std::vector<std::vector<uint8_t>> &payloads, std::string *diagnostic);
-    bool queueFrame(uint8_t opcode, const uint8_t *data, uint32_t size, std::string *diagnostic);
-    void setIoWait(IoWait wait, const char *operation);
-    bool writesWaitForRead() const;
+    bool startClient(std::string *diagnostic);
+    bool pumpNetwork(std::string *diagnostic);
+    bool flushNetwork(std::string *diagnostic);
+    bool readNetwork(bool *eof, std::string *diagnostic);
+    bool checkClientState(std::string *diagnostic);
+    void collectMessages(std::vector<std::vector<uint8_t>> &payloads);
     void noteAttemptFailed();
     void noteUpgradeSucceeded();
     bool outputDrained() const;
     const char *stateName() const;
-    const char *ioWaitName() const;
     Route routeConfig;
     // Numeric address this socket dialled, to tell a dropped flow from a dead relay.
     std::string peerAddress;
-    SSL *ssl = nullptr;
+    // The TLS + HTTP + WebSocket client of libzsgnaive (Chrome 158 handshake); sans-I/O, this class owns the socket.
+    ::zsg_ws *client = nullptr;
     int socketFd = -1;
     State state = State::Closed;
-    IoWait ioWait = IoWait::None;
     transport::HandshakePhase phase = transport::HandshakePhase::None;
-    // Keep every TLS write retry in a stable, immutable allocation. OpenSSL
-    // requires the same buffer and length after WANT_READ/WANT_WRITE; a single
-    // appendable vector violated that contract under bursty uploads.
-    std::deque<std::vector<uint8_t>> pendingOutput;
-    size_t pendingOutputOffset = 0;
-    size_t pendingOutputBytes = 0;
-    std::vector<uint8_t> inputBuffer;
-    std::string secWebSocketKey;
+    // Network bytes produced by the client and not yet accepted by the kernel.
+    std::vector<uint8_t> pending;
+    size_t pendingOffset = 0;
     // The relay parses the 64-byte obfuscation header out of the payload of the
     // FIRST binary frame alone — not out of the reassembled message and not out
     // of the TCP stream. A shorter first frame is fatal and, worse, silent: the
@@ -171,7 +154,6 @@ private:
     // is complete so no caller chunking can violate that.
     std::vector<uint8_t> openingFrame;
     bool openingFrameSent = false;
-    bool fragmentedMessage = false;
     bool failureRecorded = false;
     // Upgrades answered 503 on this TLS connection (Cloudflare front only).
     uint32_t upgradeRetries = 0;
@@ -190,8 +172,6 @@ private:
     uint64_t bytesIn = 0;
     bool summaryTaken = false;
     bool reachableRecorded = false;
-    // SSL_write returned WANT_READ: the record can only continue after input.
-    bool writeBlockedOnRead = false;
 };
 
 std::unique_ptr<transport::Socket> CreateSocket(Route route);

@@ -11,6 +11,7 @@
 #include <algorithm>
 #include <cstring>
 
+#include "TrustRoots.h"
 #include "zsg_naive/zsg_naive.h"
 
 namespace tgnet {
@@ -40,6 +41,10 @@ bool Socket::open(const struct sockaddr *address, socklen_t addressLength, std::
     c.user = config.user.c_str();
     c.password = config.password.c_str();
     c.ca_dir = config.caDir.empty() ? nullptr : config.caDir.c_str();
+    if (!config.insecureSkipVerify && !config.caDir.empty()) {
+        const char *ignoredDir;
+        FillTrust(&ignoredDir, &c.extra_roots_pem, &c.extra_roots_der, &c.extra_roots_der_count);
+    }
     c.insecure_skip_verify = config.insecureSkipVerify ? 1 : 0;
     c.user_agent = config.userAgent.c_str();
     c.sec_ch_ua = config.secChUa.c_str();
@@ -237,7 +242,7 @@ std::unique_ptr<transport::Socket> CreateFor(const std::string &proxyHost, uint1
     config.targetHost = dcAddress;
     config.targetPort = dcPort;
     // Android 14 moved the system roots into the conscrypt APEX; older releases keep them in /system.
-    config.caDir = "/apex/com.android.conscrypt/cacerts:/system/etc/security/cacerts";
+    config.caDir = SystemCaDirs();
     return CreateSocket(std::move(config));
 }
 
