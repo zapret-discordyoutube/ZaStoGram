@@ -70,8 +70,16 @@ public final class ForgejoUpdaterController {
     private List<String> downloadHosts = new ArrayList<>();
     private boolean channelRouteTried;
     private boolean channelRouteActive;
-    private static final long STALL_CHECK_MS = 40_000L;
-    private static final long STALL_MIN_BYTES = 300L * 1024L;
+    // The channel route was started first because a proxy is enabled: if it gives nothing, the mirrors are next.
+    private boolean channelFirst;
+    // A throttled host lets a few tens of KB through and then slows to a crawl or freezes: the cliff sits anywhere
+    // between 16 and 64 KB (seen on the git mirrors and Cloudflare alike). So a window in which the file grew by no more
+    // than the TOP of that range plus a little slack (headers, one TCP window) means the stream died at the cliff; a
+    // healthy mirror delivers megabytes in 15 s. The same test runs every window, so a crawl after the cliff is caught
+    // too, not only the start.
+    private static final long STALL_CHECK_MS = 15_000L;
+    private static final long STALL_CLIFF_MAX_BYTES = 64L * 1024L;
+    private static final long STALL_MIN_BYTES = STALL_CLIFF_MAX_BYTES + 16L * 1024L;
     private int downloadHostIndex;
 
     private ForgejoUpdaterController() {
@@ -723,6 +731,18 @@ public final class ForgejoUpdaterController {
             deleteFile(partialFile);
         }
 
+        if (SharedConfig.isProxyEnabled() && !channelRouteTried) {
+            // A proxy is enabled: the git hosts are reached directly by HttpGetFileTask, the app's own Telegram connection
+            // goes through the proxy. The channel route carries the same APK over that connection (SOCKS5, MTProxy,
+            // Naive alike), so it goes first; the mirrors stay as the fallback.
+            channelFirst = true;
+            FileLog.d("zasto_update proxy_enabled, trying the channel first");
+            if (tryChannelRoute()) {
+                return;
+            }
+            channelFirst = false;
+        }
+
         downloading = true;
         downloadingProgress = getCachedDownloadProgress();
         NotificationCenter.getGlobalInstance().postNotificationName(NotificationCenter.appUpdateLoading);
@@ -753,9 +773,9 @@ public final class ForgejoUpdaterController {
     }
 
     /**
-     * A throttled host neither fails nor finishes: the download crawls at a few KB/s for as long as the user waits. If the
-     * partial file grew by less than STALL_MIN_BYTES in STALL_CHECK_MS, the HTTP task is stopped (the prefix is kept) and the
-     * channel route takes over.
+     * A throttled host neither fails nor finishes: the stream stops at a cliff of 16-64 KB and then crawls or freezes for as
+     * long as the user waits. If the partial file grew by less than STALL_MIN_BYTES (the top of that range plus slack) in
+     * STALL_CHECK_MS, the HTTP task is stopped (the prefix is kept) and the channel route takes over.
      */
     private void watchForStall(File partialFile, long startLength, long requestedReleaseId, long requestedAssetId) {
         final HttpGetFileTask watched = downloadingTask;
@@ -773,8 +793,9 @@ public final class ForgejoUpdaterController {
             downloadingTask = null;
             downloading = false;
             if (!tryChannelRoute()) {
-                downloadingProgress = getCachedDownloadProgress();
-                NotificationCenter.getGlobalInstance().postNotificationName(NotificationCenter.appUpdateAvailable);
+                // The channel cannot be used (not signed in): the slow host is still better than nothing, resume it.
+                // channelRouteTried is set now, so this watcher does not stop it again.
+                downloadUpdate(false);
             }
         }, STALL_CHECK_MS);
     }
@@ -874,6 +895,12 @@ public final class ForgejoUpdaterController {
                     downloading = false;
                     downloadingProgress = getCachedDownloadProgress();
                     FileLog.e("zasto_update channel_route gave nothing");
+                    if (channelFirst) {
+                        channelFirst = false;
+                        FileLog.d("zasto_update channel first gave nothing, trying the mirrors");
+                        downloadUpdate(false);
+                        return;
+                    }
                     NotificationCenter.getGlobalInstance().postNotificationName(NotificationCenter.appUpdateAvailable);
                     return;
                 }
@@ -923,6 +950,7 @@ public final class ForgejoUpdaterController {
             downloadingTask.cancel(true);
             downloadingTask = null;
         }
+        channelFirst = false;  // a user cancel must not fall through to the mirrors
         ZaStoChannelUpdate.cancel();
         downloading = false;
         downloadingProgress = getCachedDownloadProgress();
