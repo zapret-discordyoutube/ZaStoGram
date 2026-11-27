@@ -36,6 +36,9 @@ struct Route {
     int32_t cdnDcId = 0;
     // Which of the front's two Cloudflare addresses this route dials.
     int32_t cdnAddress = -1;
+    // A front dialled over plain HTTP (ws://, port 80): no TLS, so no SNI for a
+    // network to match. A step after the TLS fronts, with its own health record.
+    bool plain = false;
     // Key for failure counting and suppression when it must not follow the
     // domain: every front domain of a DC shares one health record.
     std::string healthDomain;

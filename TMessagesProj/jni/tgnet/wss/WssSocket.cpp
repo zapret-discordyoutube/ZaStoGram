@@ -17,6 +17,7 @@
 #include <sys/epoll.h>
 #include <sys/ioctl.h>
 #include <sys/socket.h>
+#include <sys/stat.h>
 #include <unistd.h>
 
 #include <algorithm>
@@ -28,6 +29,7 @@
 #include <cstdio>
 #include <map>
 #include <mutex>
+#include <vector>
 
 namespace tgnet {
 namespace wss {
@@ -95,7 +97,9 @@ constexpr CdnFront kCdnFronts[] = {
         {"efabnxaowuzs.com", {"104.21.35.206", "172.67.179.145"}},
         {"zaftuzsftqdq.com", {"104.21.78.5", "172.67.214.67"}},
 };
-constexpr uint32_t kCdnFrontCount = sizeof(kCdnFronts) / sizeof(kCdnFronts[0]);
+// The catalog routes actually use: kCdnFronts until a refreshed list is cached
+// (see "Front catalog" below). Its size bounds the cursor.
+uint32_t cdnFrontCount();
 // A front connection is either served at once or answers 503 to every upgrade
 // (host test 27.09: 0-24 refusals before 101, or all 25 refused). Each retry on
 // the same TLS connection costs ~25 ms against a new TCP+TLS dial.
@@ -604,7 +608,7 @@ uint32_t cdnCursorLocked(int32_t network) {
     if (it == cdnCursor.end()) {
         uint32_t start = 0;
         RAND_bytes(reinterpret_cast<uint8_t *>(&start), sizeof(start));
-        it = cdnCursor.emplace(network, start % (kCdnFrontCount * 2)).first;
+        it = cdnCursor.emplace(network, start % (cdnFrontCount() * 2)).first;
     }
     return it->second;
 }
@@ -686,7 +690,7 @@ void advanceCdn(const Route &route) {
     std::lock_guard<std::mutex> lock(relayPreferencesMutex);
     uint32_t &cursor = cdnCursor[route.network];
     if (cursor == static_cast<uint32_t>(route.cdnSlot)) {
-        cursor = (cursor + 1) % (kCdnFrontCount * 2);
+        cursor = (cursor + 1) % (cdnFrontCount() * 2);
         // Interleaved (see CdnRoute): consecutive slots alternate the address.
     }
 }
@@ -716,6 +720,168 @@ std::string decodeCdnDomain(const char *encoded) {
         }
     }
     return name + ".co.uk";
+}
+
+// ---- Front catalog -------------------------------------------------------
+// The baked list (kCdnFronts) is the floor. The app downloads the current
+// tg-ws-proxy list into wss_fronts.txt next to the route health file (Java:
+// WssFrontsUpdater); a valid file replaces the baked list, and a front that
+// is not baked has no pinned addresses, so it is dialled by NAME: the first
+// connection resolves it, the way tg-ws-proxy itself does. The file is
+// re-checked at most once a minute and never needs a restart.
+struct CdnEntry {
+    std::string domain;
+    std::string address[2];  // empty: dial the domain
+};
+
+constexpr int64_t kCdnCatalogRecheckMs = 60 * 1000;
+constexpr size_t kCdnCatalogMax = 64;
+constexpr size_t kCdnCatalogMin = 3;
+
+std::mutex cdnCatalogMutex;
+std::vector<CdnEntry> cdnCatalog;
+std::string cdnCatalogPath;
+int64_t cdnCatalogCheckedAt = 0;
+int64_t cdnCatalogStamp = -1;  // mtime read last: -1 never, 0 no usable file
+
+std::vector<CdnEntry> bakedCdnCatalog() {
+    std::vector<CdnEntry> list;
+    for (const CdnFront &front : kCdnFronts) {
+        CdnEntry entry;
+        entry.domain = decodeCdnDomain(front.encodedDomain);
+        entry.address[0] = front.address[0];
+        entry.address[1] = front.address[1];
+        list.push_back(std::move(entry));
+    }
+    return list;
+}
+
+bool validCdnDomain(const std::string &name) {
+    if (name.size() < 4 || name.size() > 80 || name.front() == '.' || name.back() == '.' || name.front() == '-'
+            || name.find('.') == std::string::npos || name.find("..") != std::string::npos) {
+        return false;
+    }
+    for (char c : name) {
+        if (!((c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c == '.' || c == '-')) {
+            return false;
+        }
+    }
+    return true;
+}
+
+// One front per line (encoded as tg-ws-proxy publishes it, or a plain domain);
+// blank lines and #comments are skipped. Anything else rejects the whole file:
+// a half-understood list must not replace a working one.
+bool parseCdnCatalog(const std::string &text, std::vector<CdnEntry> *list) {
+    std::vector<CdnEntry> baked = bakedCdnCatalog();
+    std::vector<CdnEntry> result;
+    size_t pos = 0;
+    while (pos <= text.size()) {
+        size_t end = text.find('\n', pos);
+        if (end == std::string::npos) {
+            end = text.size();
+        }
+        std::string line = text.substr(pos, end - pos);
+        pos = end + 1;
+        while (!line.empty() && (line.back() == '\r' || line.back() == ' ' || line.back() == '\t')) {
+            line.pop_back();
+        }
+        size_t first = 0;
+        while (first < line.size() && (line[first] == ' ' || line[first] == '\t')) {
+            ++first;
+        }
+        line.erase(0, first);
+        if (line.empty() || line[0] == '#') {
+            continue;
+        }
+        for (char &c : line) {
+            c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+        }
+        if (!validCdnDomain(line)) {
+            return false;
+        }
+        CdnEntry entry;
+        entry.domain = decodeCdnDomain(line.c_str());
+        if (!validCdnDomain(entry.domain)) {
+            return false;
+        }
+        bool duplicate = false;
+        for (const CdnEntry &seen : result) {
+            duplicate = duplicate || seen.domain == entry.domain;
+        }
+        if (duplicate) {
+            continue;
+        }
+        for (const CdnEntry &known : baked) {
+            if (known.domain == entry.domain) {
+                entry.address[0] = known.address[0];
+                entry.address[1] = known.address[1];
+            }
+        }
+        result.push_back(std::move(entry));
+        if (result.size() > kCdnCatalogMax) {
+            return false;
+        }
+    }
+    if (result.size() < kCdnCatalogMin) {
+        return false;
+    }
+    *list = std::move(result);
+    return true;
+}
+
+void refreshCdnCatalogLocked() {
+    const int64_t now = monotonicMillis();
+    if (!cdnCatalog.empty() && (cdnCatalogPath.empty() || now - cdnCatalogCheckedAt < kCdnCatalogRecheckMs)) {
+        return;
+    }
+    cdnCatalogCheckedAt = now;
+    int64_t stamp = 0;
+    std::string text;
+    if (!cdnCatalogPath.empty()) {
+        struct stat info;
+        if (stat(cdnCatalogPath.c_str(), &info) == 0 && S_ISREG(info.st_mode) && info.st_size > 0 && info.st_size < 64 * 1024) {
+            stamp = static_cast<int64_t>(info.st_mtim.tv_sec) * 1000000000LL + info.st_mtim.tv_nsec + info.st_size;
+            if (stamp == cdnCatalogStamp && !cdnCatalog.empty()) {
+                return;
+            }
+            FILE *file = fopen(cdnCatalogPath.c_str(), "r");
+            if (file != nullptr) {
+                char buffer[4096];
+                size_t n;
+                while ((n = fread(buffer, 1, sizeof(buffer), file)) > 0) {
+                    text.append(buffer, n);
+                }
+                fclose(file);
+            }
+        }
+    }
+    std::vector<CdnEntry> list;
+    if (!text.empty() && parseCdnCatalog(text, &list)) {
+        if (LOGS_ENABLED) {
+            DEBUG_D("wss_route fronts source=file count=%zu", list.size());
+        }
+        cdnCatalog = std::move(list);
+        cdnCatalogStamp = stamp;
+        return;
+    }
+    if (!text.empty() && LOGS_ENABLED) {
+        DEBUG_D("wss_route fronts source=baked reason=file_rejected");
+    }
+    cdnCatalog = bakedCdnCatalog();
+    cdnCatalogStamp = text.empty() ? 0 : stamp;
+}
+
+uint32_t cdnFrontCount() {
+    std::lock_guard<std::mutex> lock(cdnCatalogMutex);
+    refreshCdnCatalogLocked();
+    return static_cast<uint32_t>(cdnCatalog.size());
+}
+
+CdnEntry cdnFrontAt(uint32_t index) {
+    std::lock_guard<std::mutex> lock(cdnCatalogMutex);
+    refreshCdnCatalogLocked();
+    return cdnCatalog[index % cdnCatalog.size()];
 }
 
 void loadRouteHealthFrom(const std::string &path) {
@@ -820,6 +986,12 @@ void NoteDirectStepClosed(const Route &route, uint64_t receivedBytes, const char
 
 void SetRouteHealthPath(const std::string &path) {
     loadRouteHealthFrom(path);
+    const size_t slash = path.rfind('/');
+    if (slash != std::string::npos) {
+        std::lock_guard<std::mutex> lock(cdnCatalogMutex);
+        cdnCatalogPath = path.substr(0, slash + 1) + "wss_fronts.txt";
+        cdnCatalogCheckedAt = 0;
+    }
 }
 
 void SetNetworkType(int32_t networkType) {
@@ -882,11 +1054,13 @@ static bool DirectRoute(int32_t network, int32_t dcId, Route *route) {
     return true;
 }
 
-static bool CdnRoute(int32_t network, int32_t dcId, Route *route, bool ignoreSuppression = false) {
+// plain: the same front over ws:// on port 80. Health is kept apart from the TLS
+// step ("cdn-plain-"), and still contains "/cdn-" so it is never persisted.
+static bool CdnRoute(int32_t network, int32_t dcId, Route *route, bool ignoreSuppression = false, bool plain = false) {
     Route result;
     result.network = network;
     const std::string prefix = "kws" + std::to_string(dcId);
-    result.healthDomain = "cdn-" + prefix;
+    result.healthDomain = (plain ? "cdn-plain-" : "cdn-") + prefix;
     if (!ignoreSuppression && routeSuppressed(network, result.healthDomain)) {
         return false;
     }
@@ -903,16 +1077,18 @@ static bool CdnRoute(int32_t network, int32_t dcId, Route *route, bool ignoreSup
     // Without a known-good address consecutive slots alternate the address
     // on the same domain; with one, every slot is the next domain, so a
     // failure never repeats the attempt that just failed.
-    const CdnFront &front = kCdnFronts[(addressKnown ? slot : slot / 2) % kCdnFrontCount];
+    const CdnEntry front = cdnFrontAt((addressKnown ? slot : slot / 2) % cdnFrontCount());
     result.cdnSlot = static_cast<int32_t>(slot);
     result.cdnDcId = dcId;
     // The fronts have no -1 media hosts: media rides kwsN too, as in Mirrly,
     // where DC1 media loads on the user's mobile network.
-    result.domain = prefix + "." + decodeCdnDomain(front.encodedDomain);
+    result.domain = prefix + "." + front.domain;
     result.cdnAddress = address;
-    result.relayHost = front.address[address];
+    // A front without a pinned address (new in the refreshed list) is dialled by name.
+    result.relayHost = front.address[address].empty() ? result.domain : front.address[address];
     result.relayHostFallback = result.domain;
-    result.relayPort = 443;
+    result.relayPort = plain ? 80 : 443;
+    result.plain = plain;
     result.path = kOfficialPath;
     result.viaFallback = preferFallback(result);
     result.connectHost = result.viaFallback ? result.relayHostFallback : result.relayHost;
@@ -924,8 +1100,9 @@ bool OfficialRoute(int32_t dcId, bool mediaConnection, bool testBackend, const s
     if (route != nullptr && !testBackend && dcId == kNoRelayDcId) {
         // DC203 отдаёт медиа аккаунтам без Premium и своего kws-релея не имеет.
         const int32_t network = currentNetwork.load();
-        return CdnRoute(network, dcId, route) || TunnelRoute(network, dcAddress, route)
-                || DirectRoute(network, dcId, route) || CdnRoute(network, dcId, route, true);
+        return CdnRoute(network, dcId, route) || CdnRoute(network, dcId, route, false, true)
+                || TunnelRoute(network, dcAddress, route) || DirectRoute(network, dcId, route)
+                || CdnRoute(network, dcId, route, true);
     }
     if (route == nullptr || testBackend || dcId < 1 || dcId > 5) {
         return false;
@@ -951,7 +1128,8 @@ bool OfficialRoute(int32_t dcId, bool mediaConnection, bool testBackend, const s
         // медиа пробовали и прямой путь первым (logs (13)): 27 попыток к медиа
         // DC1, ни одного TCP-подключения, тогда как задушенный туннель мелкими
         // частями хоть что-то отдаёт.
-        if (CdnRoute(result.network, dcId, route) || TunnelRoute(result.network, dcAddress, route)
+        if (CdnRoute(result.network, dcId, route) || CdnRoute(result.network, dcId, route, false, true)
+                || TunnelRoute(result.network, dcAddress, route)
                 || DirectRoute(result.network, dcId, route)) {
             return true;
         }
@@ -980,7 +1158,7 @@ bool DatacenterTunneled(int32_t dcId, bool mediaConnection, bool testBackend) {
 
 bool FollowCdnRoute(const Route &stale, Route *fresh) {
     return isCdn(stale) && stale.network == currentNetwork.load()
-            && CdnRoute(stale.network, stale.cdnDcId, fresh, true) && fresh->cdnSlot != stale.cdnSlot;
+            && CdnRoute(stale.network, stale.cdnDcId, fresh, true, stale.plain) && fresh->cdnSlot != stale.cdnSlot;
 }
 
 bool RouteUsable(const Route &route) {
@@ -1097,6 +1275,19 @@ bool Socket::startClient(std::string *diagnostic) {
     zsg_ws_config config = {};
     config.host = routeConfig.domain.c_str();
     config.port = routeConfig.relayPort;
+    // A Cloudflare front: the TLS server name is the zone ("pclead.co.uk"); the
+    // kwsN.<zone> name that picks the DC travels only in the encrypted Host
+    // header. Every front used to put "kwsN." into the clear-text SNI, one
+    // pattern a network could match to cut all of them at once.
+    std::string frontSni;
+    if (isCdn(routeConfig) && !routeConfig.plain) {
+        const size_t dot = routeConfig.domain.find('.');
+        if (dot != std::string::npos && dot + 1 < routeConfig.domain.size()) {
+            frontSni = routeConfig.domain.substr(dot + 1);
+            config.sni = frontSni.c_str();
+        }
+    }
+    config.plain = routeConfig.plain ? 1 : 0;
     config.path = routeConfig.path.c_str();
     config.origin = "https://web.telegram.org";
     config.user_agent = "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/158.0.0.0 Mobile Safari/537.36";

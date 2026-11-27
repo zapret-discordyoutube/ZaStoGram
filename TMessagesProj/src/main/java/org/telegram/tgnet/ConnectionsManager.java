@@ -1010,6 +1010,8 @@ public class ConnectionsManager extends BaseController {
         }
 
         native_init(currentAccount, version, layer, apiId, deviceModel, systemVersion, appVersion, langCode, systemLangCode, configPath, logPath, regId, cFingerprint, installer, packageId, timezoneOffset, userId, userPremium, enablePushConnection, ApplicationLoader.isNetworkOnline(), ApplicationLoader.getCurrentNetworkType(), SharedConfig.measureDevicePerformanceClass());
+        // ZaStoGram: keeps the WSS Cloudflare front list (wss_fronts.txt next to the route health file) current.
+        org.telegram.zastogram.wss.WssFrontsUpdater.start(configPath);
         // native_init stores the flag but does not create the dedicated type-8
         // push connection. Apply it explicitly so service-only cold starts can
         // receive updates without waiting for an Activity or settings change.

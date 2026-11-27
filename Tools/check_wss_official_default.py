@@ -61,14 +61,30 @@ def main() -> None:
             and "!isCdn(routeConfig) && !moveToNextRelayAddress(routeConfig)" in wss_cpp,
             "a failed relay address must hand the DC to its other ingress before the DNS name")
     require("dcId == kNoRelayDcId" in wss_cpp
-            and "return CdnRoute(network, dcId, route) || TunnelRoute(network, dcAddress, route)\n"
-                "                || DirectRoute(network, dcId, route) || CdnRoute(network, dcId, route, true);" in wss_cpp,
-            "DC203 must go fronts -> tunnel -> guarded direct -> fronts ignoring suppression")
-    require("if (CdnRoute(result.network, dcId, route) || TunnelRoute(result.network, dcAddress, route)\n"
+            and "return CdnRoute(network, dcId, route) || CdnRoute(network, dcId, route, false, true)\n"
+                "                || TunnelRoute(network, dcAddress, route) || DirectRoute(network, dcId, route)\n"
+                "                || CdnRoute(network, dcId, route, true);" in wss_cpp,
+            "DC203 must go fronts -> plain fronts -> tunnel -> guarded direct -> fronts ignoring suppression")
+    require("if (CdnRoute(result.network, dcId, route) || CdnRoute(result.network, dcId, route, false, true)\n"
+            "                || TunnelRoute(result.network, dcAddress, route)\n"
             "                || DirectRoute(result.network, dcId, route)) {" in wss_cpp
             and "return CdnRoute(result.network, dcId, route, true);" in wss_cpp,
             "a DC with a closed relay must try guarded direct TCP only after the fronts and the tunnel, "
             "and fall back to the fronts, never to unguarded direct TCP")
+    # A front is dialled with the zone as the TLS server name, never kwsN.<zone> (one pattern a network can
+    # match to cut every front); the kwsN name travels only in the encrypted Host header. The plain ws://
+    # step is a separate route with its own health record.
+    require("config.sni = frontSni.c_str();" in wss_cpp
+            and "isCdn(routeConfig) && !routeConfig.plain" in wss_cpp
+            and "config.plain = routeConfig.plain ? 1 : 0;" in wss_cpp,
+            "Cloudflare fronts must send the zone, not kwsN.<zone>, as the TLS server name")
+    require("result.relayPort = plain ? 80 : 443;" in wss_cpp
+            and '(plain ? "cdn-plain-" : "cdn-") + prefix' in wss_cpp,
+            "the plain ws:// front step must use port 80 and its own health record")
+    require("CdnRoute(stale.network, stale.cdnDcId, fresh, true, stale.plain)" in wss_cpp,
+            "a pooled spare must follow its front to the next slot of the SAME step (plain stays plain)")
+    require("wss_fronts.txt" in wss_cpp and "parseCdnCatalog" in wss_cpp,
+            "the front catalog must read the refreshed list and validate it as a whole")
     require("if (routeSuppressed(network, name)) {" in wss_cpp
             and '"direct-dc"' in wss_cpp
             and "suppressLocked(route, health, now, failure);" in wss_cpp

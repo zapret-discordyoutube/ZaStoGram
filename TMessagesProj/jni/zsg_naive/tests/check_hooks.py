@@ -26,7 +26,7 @@ HOOKS = {
     JNI / "mtproxy/MtProxyOptions.h": ["bool naive = false;", "naive == other.naive", "normalized.naive = options.naive;"],
     JNI / "TgNetWrapper.cpp": ["jclass_MtProxyOptions_naive", '"naive", "Z"', "RegisterWebProxyJni"],
     JAVA / "tgnet/MtProxyOptions.java": ["public final boolean naive;", "public static MtProxyOptions naive()"],
-    JAVA / "tgnet/ConnectionsManager.java": ["MtProxyOptions.naive()", "MtProxyOptions.naive(), activationGeneration", "NaiveWebProxy.apply(hasSelectedProxy ? settings : null)", "NaiveWebProxy.apply(proxySettings)"],
+    JAVA / "tgnet/ConnectionsManager.java": ["MtProxyOptions.naive()", "MtProxyOptions.naive(), activationGeneration", "NaiveWebProxy.apply(hasSelectedProxy ? settings : null)", "NaiveWebProxy.apply(proxySettings)", "WssFrontsUpdater.start(configPath)"],
     JAVA / "proxy/ProxySettings.java": ["NAIVE", "case NAIVE:", "Type.NAIVE"],
     JAVA / "proxy/ProxyWssFallback.java": ["getType() != ProxySettings.Type.NAIVE"],
     JAVA / "messenger/ProxyLinkHelper.java": ["TYPE_NAIVE", "ProxySettings.Type.NAIVE"],

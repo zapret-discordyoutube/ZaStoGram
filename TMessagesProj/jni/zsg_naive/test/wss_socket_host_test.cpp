@@ -1,7 +1,7 @@
 // Host test of the REAL rewritten tgnet/wss/WssSocket.cpp: the socket is driven like ConnectionSocket drives it
 // (level-triggered epoll, EPOLLOUT only while wantsWrite()), against scripts/ws_echo_server.py with real certificate
 // verification against the lab CA. Checks: upgrade, the 64-byte opening-frame rule, echo, close.
-// Usage: wss_socket_host_test PORT        (env ZSG_LAB_CA_FILE = lab CA PEM)
+// Usage: wss_socket_host_test PORT [plain]   (env ZSG_LAB_CA_FILE = lab CA PEM; "plain" = ws:// against ws_echo_server.py --plain)
 #include <arpa/inet.h>
 #include <netinet/in.h>
 #include <sys/epoll.h>
@@ -21,6 +21,7 @@ int main(int argc, char **argv) {
     route.domain = "proxy.test";
     route.path = "/apiws";
     route.healthDomain = "proxy.test";
+    route.plain = argc > 2 && std::string(argv[2]) == "plain";
     auto socket = tgnet::wss::CreateSocket(route);
 
     sockaddr_in a{};
