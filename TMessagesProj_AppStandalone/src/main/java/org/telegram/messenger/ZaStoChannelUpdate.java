@@ -11,6 +11,8 @@ import java.io.FileOutputStream;
 import java.io.InputStream;
 import java.io.OutputStream;
 import java.util.ArrayList;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 /**
  * Last-resort route for an update that the Forgejo/GitHub hosts do not deliver (they are throttled or dropped by name in
@@ -31,6 +33,26 @@ final class ZaStoChannelUpdate implements NotificationCenter.NotificationCenterD
         void onDone(File dest);
     }
 
+    /** What the "update check through the channel" found: the newest release of the running channel (dev or stable). */
+    interface CheckCallback {
+        /** The newest newer release, or null (nothing newer, no signed-in account, the route did not work). */
+        void onResult(CheckResult result);
+    }
+
+    static final class CheckResult {
+        String tag;
+        String assetName;
+        long size;
+        String changelog;
+        /** Unix time of the post. */
+        int date;
+    }
+
+    private static final Pattern CAPTION_VERSION = Pattern.compile("Версия:\\s*(\\S+)\\s*\\((dev|stable)\\)");
+    private static final Pattern DEV_TAG = Pattern.compile("^zastogram-apk-(\\d+)-1$");
+    private static final Pattern STABLE_TAG = Pattern.compile("^(\\d+)\\.(\\d+)\\.(\\d+)$");
+    private static final String CHANGES_MARK = "Что изменилось:";
+
     private static final String CHANNEL = "zastogram";
     private static final int HISTORY_LIMIT = 60;
     private static ZaStoChannelUpdate active;
@@ -40,6 +62,10 @@ final class ZaStoChannelUpdate implements NotificationCenter.NotificationCenterD
     private final String assetName;
     private final File dest;
     private final Callback callback;
+    private CheckCallback checkCallback;
+    private boolean checkDev;
+    private int checkEmbeddedBuild;
+    private String checkEmbeddedTag;
     private TLRPC.Document document;
     private String fileName;
     private boolean finished;
@@ -66,6 +92,28 @@ final class ZaStoChannelUpdate implements NotificationCenter.NotificationCenterD
             return true;
         }
         active = new ZaStoChannelUpdate(account, tag, assetName, dest, callback);
+        active.resolveChannel();
+        return true;
+    }
+
+    /**
+     * Looks for a newer release of this channel (dev or stable) among the newest posts of @zastogram, through the app's own
+     * Telegram connection. Used when no git host answers: the posts carry "Версия: &lt;tag&gt; (dev|stable)" and the APKs.
+     * False when it cannot run at all (no signed-in account).
+     */
+    static boolean check(boolean dev, int embeddedBuild, String embeddedTag, CheckCallback callback) {
+        final int account = UserConfig.selectedAccount;
+        if (!UserConfig.getInstance(account).isClientActivated()) {
+            return false;
+        }
+        if (active != null && !active.finished) {
+            return false;
+        }
+        active = new ZaStoChannelUpdate(account, "", "", new File("/dev/null"), null);
+        active.checkCallback = callback;
+        active.checkDev = dev;
+        active.checkEmbeddedBuild = embeddedBuild;
+        active.checkEmbeddedTag = embeddedTag;
         active.resolveChannel();
         return true;
     }
@@ -114,7 +162,11 @@ final class ZaStoChannelUpdate implements NotificationCenter.NotificationCenterD
                 finish(null);
                 return;
             }
-            findAndLoad(((TLRPC.messages_Messages) response).messages);
+            if (checkCallback != null) {
+                findLatest(((TLRPC.messages_Messages) response).messages);
+            } else {
+                findAndLoad(((TLRPC.messages_Messages) response).messages);
+            }
         }));
     }
 
@@ -126,6 +178,116 @@ final class ZaStoChannelUpdate implements NotificationCenter.NotificationCenterD
             }
         }
         return null;
+    }
+
+    private static int[] parseStable(String tag) {
+        Matcher m = STABLE_TAG.matcher(tag);
+        if (!m.matches()) {
+            return null;
+        }
+        return new int[]{Integer.parseInt(m.group(1)), Integer.parseInt(m.group(2)), Integer.parseInt(m.group(3))};
+    }
+
+    private static String changesOf(String caption) {
+        int at = caption.indexOf(CHANGES_MARK);
+        if (at < 0) {
+            return null;
+        }
+        String rest = caption.substring(at + CHANGES_MARK.length()).trim();
+        int end = rest.indexOf("\n\n");
+        if (end >= 0) {
+            rest = rest.substring(0, end).trim();
+        }
+        return TextUtils.isEmpty(rest) ? null : rest;
+    }
+
+    private void findLatest(ArrayList<TLRPC.Message> messages) {
+        // Newest first. The caption with the tag sits on one message of an album; the APKs of that album share its grouped id.
+        for (TLRPC.Message message : messages) {
+            if (message.message == null) {
+                continue;
+            }
+            Matcher matcher = CAPTION_VERSION.matcher(message.message);
+            if (!matcher.find()) {
+                continue;
+            }
+            final String tag = matcher.group(1);
+            final boolean isDev = "dev".equals(matcher.group(2));
+            if (isDev != checkDev) {
+                continue;
+            }
+            if (isDev) {
+                Matcher dev = DEV_TAG.matcher(tag);
+                if (!dev.matches() || Integer.parseInt(dev.group(1)) <= checkEmbeddedBuild) {
+                    FileLog.d("zasto_update channel_check newest " + tag + " is not newer");
+                    finish(null);
+                    return;
+                }
+            } else {
+                int[] posted = parseStable(tag);
+                int[] mine = parseStable(checkEmbeddedTag == null ? "" : checkEmbeddedTag);
+                if (posted == null) {
+                    continue;
+                }
+                boolean newer = mine == null;
+                for (int i = 0; mine != null && i < 3; i++) {
+                    if (posted[i] != mine[i]) {
+                        newer = posted[i] > mine[i];
+                        break;
+                    }
+                }
+                if (!newer) {
+                    FileLog.d("zasto_update channel_check newest " + tag + " is not newer");
+                    finish(null);
+                    return;
+                }
+            }
+            TLRPC.Document found = null;
+            for (String abi : android.os.Build.SUPPORTED_ABIS) {
+                final String name = "ZaStoGram-standalone-" + abi + ".apk";
+                for (TLRPC.Message other : messages) {
+                    boolean sameAlbum = message.grouped_id != 0 ? other.grouped_id == message.grouped_id : other == message;
+                    if (sameAlbum && other.media instanceof TLRPC.TL_messageMediaDocument && other.media.document != null
+                            && name.equals(documentName(other.media.document))) {
+                        found = other.media.document;
+                        break;
+                    }
+                }
+                if (found != null) {
+                    break;
+                }
+            }
+            if (found == null) {
+                FileLog.e("zasto_update channel_check no APK for this device in the post of " + tag);
+                finish(null);
+                return;
+            }
+            CheckResult result = new CheckResult();
+            result.tag = tag;
+            result.assetName = documentName(found);
+            result.size = found.size;
+            result.changelog = changesOf(message.message);
+            result.date = message.date;
+            FileLog.d("zasto_update channel_check found " + tag + " " + result.assetName);
+            finishCheck(result);
+            return;
+        }
+        FileLog.d("zasto_update channel_check no matching post");
+        finish(null);
+    }
+
+    private void finishCheck(CheckResult result) {
+        if (finished) {
+            return;
+        }
+        finished = true;
+        if (requestId != 0) {
+            ConnectionsManager.getInstance(account).cancelRequest(requestId, true);
+        }
+        if (active == this) {
+            active = null;
+        }
+        checkCallback.onResult(result);
     }
 
     private void findAndLoad(ArrayList<TLRPC.Message> messages) {
@@ -223,6 +385,10 @@ final class ZaStoChannelUpdate implements NotificationCenter.NotificationCenterD
     }
 
     private void finish(File result) {
+        if (checkCallback != null) {
+            finishCheck(null);
+            return;
+        }
         if (finished) {
             return;
         }

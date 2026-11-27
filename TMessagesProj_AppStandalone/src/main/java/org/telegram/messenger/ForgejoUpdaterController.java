@@ -70,6 +70,8 @@ public final class ForgejoUpdaterController {
     private List<String> downloadHosts = new ArrayList<>();
     private boolean channelRouteTried;
     private boolean channelRouteActive;
+    // The pending update was found through the channel (no git host answered): download it through the channel first too.
+    private boolean foundViaChannel;
     // The channel route was started first because a proxy is enabled: if it gives nothing, the mirrors are next.
     private boolean channelFirst;
     // A throttled host lets a few tens of KB through and then slows to a crawl or freezes: the cliff sits anywhere
@@ -252,6 +254,7 @@ public final class ForgejoUpdaterController {
             boolean changed = false;
             boolean tryNext = false;
             boolean tryEntry = false;
+            boolean failed = false;
             try {
                 if (result == null) {
                     throw new IllegalStateException("Forgejo returned no response");
@@ -267,25 +270,27 @@ public final class ForgejoUpdaterController {
                         + " changed=" + changed
                         + " host=" + host);
                 lastCheck = System.currentTimeMillis();
+                foundViaChannel = false;
                 save();
                 ZaStoGitMirrors.rememberGood(host);
             } catch (Exception e) {
                 FileLog.e("Failed to check ZaStoGram updates at " + url, e);
                 tryNext = index + 1 < hosts.size();
                 tryEntry = !tryNext && !fromEntry;
+                failed = true;
             } finally {
                 if (tryNext) {
                     requestReleases(hosts, index + 1, fromEntry);
                 } else if (tryEntry) {
                     ZaStoGitMirrors.fetchEntryNames(hosts, fresh -> {
                         if (fresh.isEmpty()) {
-                            checkingForUpdate = false;
-                            finishCheck(false);
-                            scheduleNextCheck();
+                            checkViaChannel();
                         } else {
                             requestReleases(fresh, 0, true);
                         }
                     });
+                } else if (failed) {
+                    checkViaChannel();
                 } else {
                     checkingForUpdate = false;
                     finishCheck(changed);
@@ -297,6 +302,49 @@ public final class ForgejoUpdaterController {
                 .setHeader("User-Agent", "ZaStoGram-Android-Updater")
                 .setTimeouts(ZaStoGitMirrors.CONNECT_TIMEOUT_MS, ZaStoGitMirrors.READ_TIMEOUT_MS)
                 .execute(url);
+    }
+
+    /**
+     * No git host answered (they are dropped by name in some countries): the release is also a post in the project channel,
+     * and Telegram's own connection (WSS, proxy, Naive) reaches it. The newest post of this channel (dev or stable) that is
+     * newer than the installed build becomes the pending update; its APK is then loaded through the channel as well.
+     */
+    private void checkViaChannel() {
+        final boolean dev = isDevChannel();
+        boolean started = ZaStoChannelUpdate.check(dev, getEmbeddedBuildNumber(), getEmbeddedReleaseTag(), found -> AndroidUtilities.runOnUIThread(() -> {
+            boolean changed = false;
+            if (found != null) {
+                String repository = ApplicationLoader.applicationContext.getString(
+                        org.telegram.messenger.web.R.string.ZastoForgejoRepository);
+                ReleaseCandidate candidate = new ReleaseCandidate();
+                candidate.version = found.tag;
+                candidate.displayVersionCode = parseDisplayVersionCode(found.tag);
+                candidate.changelog = found.changelog;
+                candidate.releaseTag = found.tag;
+                Matcher digits = Pattern.compile("(\\d+)").matcher(found.tag);
+                candidate.releaseId = digits.find() ? Math.max(1L, Long.parseLong(digits.group(1))) : 1L;
+                candidate.assetId = 1L;
+                java.text.SimpleDateFormat format = new java.text.SimpleDateFormat("yyyyMMddHHmmss", java.util.Locale.US);
+                format.setTimeZone(java.util.TimeZone.getTimeZone("UTC"));
+                candidate.updateOrder = Long.parseLong(format.format(new java.util.Date(found.date * 1000L)));
+                candidate.fileUrl = "https://git.zapret.moe/" + repository + "/releases/download/" + found.tag + "/" + found.assetName;
+                candidate.assetSize = found.size;
+                // The same release already pending (found on a git host earlier): keep it, with its downloaded file.
+                changed = found.tag.equals(releaseTag) ? false : applyCandidate(candidate);
+                foundViaChannel = true;
+                lastCheck = System.currentTimeMillis();
+                save();
+                FileLog.d("zasto_update check_result via_channel candidate=" + found.tag + " changed=" + changed);
+            }
+            checkingForUpdate = false;
+            finishCheck(changed);
+            scheduleNextCheck();
+        }));
+        if (!started) {
+            checkingForUpdate = false;
+            finishCheck(false);
+            scheduleNextCheck();
+        }
     }
 
     private static String getReleasesUrl() {
@@ -731,7 +779,7 @@ public final class ForgejoUpdaterController {
             deleteFile(partialFile);
         }
 
-        if (SharedConfig.isProxyEnabled() && !channelRouteTried) {
+        if ((SharedConfig.isProxyEnabled() || foundViaChannel) && !channelRouteTried) {
             // A proxy is enabled: the git hosts are reached directly by HttpGetFileTask, the app's own Telegram connection
             // goes through the proxy. The channel route carries the same APK over that connection (SOCKS5, MTProxy,
             // Naive alike), so it goes first; the mirrors stay as the fallback.
