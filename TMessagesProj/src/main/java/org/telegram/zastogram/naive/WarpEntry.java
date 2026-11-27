@@ -288,6 +288,32 @@ public final class WarpEntry {
         }
     }
 
+    private static boolean responseComplete(byte[] bytes) {
+        final String text = new String(bytes, StandardCharsets.ISO_8859_1);
+        final int split = text.indexOf("\r\n\r\n");
+        if (split < 0) {
+            return false;
+        }
+        final String head = text.substring(0, split).toLowerCase(Locale.US);
+        final int bodyStart = split + 4;
+        final int lengthAt = head.indexOf("content-length:");
+        if (lengthAt >= 0) {
+            int end = head.indexOf("\r\n", lengthAt);
+            if (end < 0) {
+                end = head.length();
+            }
+            try {
+                return bytes.length - bodyStart >= Integer.parseInt(head.substring(lengthAt + 15, end).trim());
+            } catch (NumberFormatException e) {
+                return false;
+            }
+        }
+        if (head.contains("transfer-encoding: chunked")) {
+            return text.endsWith("\r\n0\r\n\r\n");
+        }
+        return false;
+    }
+
     /** A minimal HTTPS/1.1 client (any method, bearer token, JSON body): {status line, body} or null. */
     private static String[] httpsRequest(String method, String path, String bearer, String body) throws Exception {
         final javax.net.ssl.SSLSocketFactory factory = (javax.net.ssl.SSLSocketFactory) javax.net.ssl.SSLSocketFactory.getDefault();
@@ -314,8 +340,12 @@ public final class WarpEntry {
             final InputStream in = socket.getInputStream();
             final byte[] buffer = new byte[8192];
             int read;
-            while ((read = in.read(buffer)) > 0 && raw.size() < (1 << 20)) {
+            // Stop as soon as the response is complete (Content-Length bytes or the last chunk): the server may keep the connection open.
+            while (raw.size() < (1 << 20) && (read = in.read(buffer)) > 0) {
                 raw.write(buffer, 0, read);
+                if (responseComplete(raw.toByteArray())) {
+                    break;
+                }
             }
             final byte[] bytes = raw.toByteArray();
             final String text = new String(bytes, StandardCharsets.ISO_8859_1);
