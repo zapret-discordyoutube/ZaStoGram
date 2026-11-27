@@ -976,6 +976,9 @@ public class ConnectionsManager extends BaseController {
             }
         }
         applyWssTransport(legacyProxyEnabled);
+        if (!legacyProxyEnabled || proxySettings.getType() != ProxySettings.Type.NAIVE) {
+            org.telegram.zastogram.naive.NaiveWebProxy.apply(null);  // ZaStoGram: mini apps through a Naive entry while the chats use another transport
+        }
         String installer = "";
         try {
             Context context = ApplicationLoader.applicationContext;

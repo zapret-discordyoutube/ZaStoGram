@@ -156,6 +156,7 @@ public class ProxyListActivity extends BaseFragment implements NotificationCente
     private int wssTransportHeaderRow;
     private int wssTransportRow;
     private int callRelayTcpTlsRow;
+    private int naiveWebAppsRow;
     private int wssTransportInfoRow;
     private int deleteAllRow;
 
@@ -627,6 +628,11 @@ public class ProxyListActivity extends BaseFragment implements NotificationCente
                 boolean enabled = !SharedConfig.callRelayTcpTlsEnabled;
                 SharedConfig.setCallRelayTcpTlsEnabled(enabled);
                 ((TextCheckCell) view).setChecked(enabled);
+            } else if (position == naiveWebAppsRow) {
+                boolean enabled = !SharedConfig.naiveWebAppsEnabled;
+                SharedConfig.setNaiveWebAppsEnabled(enabled);
+                ((TextCheckCell) view).setChecked(enabled);
+                org.telegram.zastogram.naive.NaiveWebProxy.apply(useProxySettings && SharedConfig.currentProxy != null ? SharedConfig.currentProxy.settings : null);
             } else if (position >= proxyStartRow && position < proxyEndRow) {
                 if (!selectedItems.isEmpty()) {
                     listAdapter.toggleSelected(position);
@@ -954,6 +960,7 @@ public class ProxyListActivity extends BaseFragment implements NotificationCente
         wssTransportHeaderRow = rowCount++;
         wssTransportRow = rowCount++;
         callRelayTcpTlsRow = rowCount++;
+        naiveWebAppsRow = rowCount++;
         wssTransportInfoRow = rowCount++;
         connectionsHeaderRow = rowCount++;
 
@@ -1376,7 +1383,9 @@ public class ProxyListActivity extends BaseFragment implements NotificationCente
                     } else if (position == wssTransportRow) {
                         checkCell.setTextAndCheck(getString(R.string.UseWssTransport), isWssTransportSelected(), true);
                     } else if (position == callRelayTcpTlsRow) {
-                        checkCell.setTextAndCheck(getString(R.string.CallRelayTcpTls), SharedConfig.callRelayTcpTlsEnabled, false);
+                        checkCell.setTextAndCheck(getString(R.string.CallRelayTcpTls), SharedConfig.callRelayTcpTlsEnabled, true);
+                    } else if (position == naiveWebAppsRow) {
+                        checkCell.setTextAndCheck(getString(R.string.NaiveWebApps), SharedConfig.naiveWebAppsEnabled, false);
                     }
                     break;
                 }
@@ -1399,7 +1408,7 @@ public class ProxyListActivity extends BaseFragment implements NotificationCente
                     } else if (position == mtProxyStartupCoverInfoRow) {
                         cell.setText(getString(R.string.MtProxyStartupCoverInfo));
                     } else if (position == wssTransportInfoRow) {
-                        cell.setText(getString(R.string.WssTransportInfo) + "\n\n" + getString(R.string.CallRelayTcpTlsInfo));
+                        cell.setText(getString(R.string.WssTransportInfo) + "\n\n" + getString(R.string.CallRelayTcpTlsInfo) + "\n\n" + getString(R.string.NaiveWebAppsInfo));
                     }
                     break;
                 }
@@ -1515,6 +1524,8 @@ public class ProxyListActivity extends BaseFragment implements NotificationCente
                     checkCell.setChecked(isWssTransportSelected());
                 } else if (position == callRelayTcpTlsRow) {
                     checkCell.setChecked(SharedConfig.callRelayTcpTlsEnabled);
+                } else if (position == naiveWebAppsRow) {
+                    checkCell.setChecked(SharedConfig.naiveWebAppsEnabled);
                 }
             } else {
                 super.onBindViewHolder(holder, position, payloads);
@@ -1539,6 +1550,8 @@ public class ProxyListActivity extends BaseFragment implements NotificationCente
                     checkCell.setChecked(isWssTransportSelected());
                 } else if (position == callRelayTcpTlsRow) {
                     checkCell.setChecked(SharedConfig.callRelayTcpTlsEnabled);
+                } else if (position == naiveWebAppsRow) {
+                    checkCell.setChecked(SharedConfig.naiveWebAppsEnabled);
                 }
             }
         }
@@ -1546,7 +1559,7 @@ public class ProxyListActivity extends BaseFragment implements NotificationCente
         @Override
         public boolean isEnabled(RecyclerView.ViewHolder holder) {
             int position = holder.getAdapterPosition();
-            return position == useProxyRow || position == rotationRow || position == tlsProfileRow || position == clientHelloFragmentationRow || position == mtProxySoftMuxRow || position == mtProxyConnectionPatternRow || position == mtProxyRecordSizingRow || position == mtProxyTimingRow || position == mtProxyStartupCoverRow || position == wssTransportRow || position == callRelayTcpTlsRow || position == proxyAddRow || position == deleteAllRow || position >= proxyStartRow && position < proxyEndRow;
+            return position == useProxyRow || position == rotationRow || position == tlsProfileRow || position == clientHelloFragmentationRow || position == mtProxySoftMuxRow || position == mtProxyConnectionPatternRow || position == mtProxyRecordSizingRow || position == mtProxyTimingRow || position == mtProxyStartupCoverRow || position == wssTransportRow || position == callRelayTcpTlsRow || position == naiveWebAppsRow || position == proxyAddRow || position == deleteAllRow || position >= proxyStartRow && position < proxyEndRow;
         }
 
         @Override
@@ -1640,6 +1653,8 @@ public class ProxyListActivity extends BaseFragment implements NotificationCente
                 return -25;
             } else if (position == callRelayTcpTlsRow) {
                 return -31;
+            } else if (position == naiveWebAppsRow) {
+                return -32;
             } else if (position == wssTransportInfoRow) {
                 return -26;
             } else if (position >= proxyStartRow && position < proxyEndRow) {
@@ -1655,7 +1670,7 @@ public class ProxyListActivity extends BaseFragment implements NotificationCente
                 return VIEW_TYPE_SHADOW;
             } else if (position == proxyAddRow || position == deleteAllRow) {
                 return VIEW_TYPE_TEXT_SETTING;
-            } else if (position == useProxyRow || position == rotationRow || position == clientHelloFragmentationRow || position == mtProxySoftMuxRow || position == wssTransportRow || position == callRelayTcpTlsRow) {
+            } else if (position == useProxyRow || position == rotationRow || position == clientHelloFragmentationRow || position == mtProxySoftMuxRow || position == wssTransportRow || position == callRelayTcpTlsRow || position == naiveWebAppsRow) {
                 return VIEW_TYPE_TEXT_CHECK;
             } else if (position == connectionsHeaderRow || position == wssTransportHeaderRow) {
                 return VIEW_TYPE_HEADER;

@@ -26,8 +26,8 @@ the wire. The protocol work (TLS handshake, HTTP/2, preamble, CONNECT, padding) 
 ## WebViews (mini apps, in-app browser)
 `WebProxy.cpp` is a loopback HTTP proxy (127.0.0.1, random port) that accepts only `CONNECT` and tunnels it through the
 selected Naive server over ONE shared Naive connection; `org.telegram.zastogram.naive.NaiveWebProxy` starts it and points
-every WebView of the process at it with androidx.webkit `ProxyController` (no direct rule: fail closed). It runs only while a
-Naive entry is selected. Limits: plain http is refused; any local app can reach the loopback port (ProxyController cannot
+every WebView of the process at it with androidx.webkit `ProxyController` (no direct rule: fail closed). It runs while a
+Naive entry is selected, or while the setting "Mini apps through Naive" (`SharedConfig.naiveWebAppsEnabled`, a row in the proxy list screen) is on and the proxy list holds a Naive entry (the first valid one is used). Limits: plain http is refused; any local app can reach the loopback port (ProxyController cannot
 send credentials); a WebView without PROXY_OVERRIDE support stays direct (logged). Hooks: `ConnectionsManager.java`
 (`NaiveWebProxy.apply(...)` in `setProxySettings` and in the startup restore) and `TgNetWrapper.cpp` (`RegisterWebProxyJni`).
 

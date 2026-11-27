@@ -396,6 +396,8 @@
     <string name="WssTransportInfo">Использует WebSocket-релеи Telegram для поддерживаемых дата-центров. Это транспорт клиента, а не прокси: локальный порт и свой шлюз не нужны.</string>
     <string name="WssTransportFallbackActive">Прокси недоступен, работаем через WSS Telegram</string>
     <string name="CallRelayTcpTls">Звонки через TCP/TLS (эксперимент)</string>
+    <string name="NaiveWebApps">Мини-приложения через Naive</string>
+    <string name="NaiveWebAppsInfo">Мини-приложения и встроенный браузер идут через первый NaiveProxy-сервер из списка, даже когда чаты работают через WSS или другой транспорт. Если выбран Naive-прокси, они и так идут через него. Нужна запись NaiveProxy в списке.</string>
     <string name="CallRelayTcpTlsInfo">Дополнительно пробует релеи звонка по TCP и TLS, а не только по UDP. Помогает там, где UDP режут целиком. Эти маршруты используются, только если UDP не заработал, и заметно ухудшают качество связи.</string>
     <!-- ZaStoGram — экран логов -->
     <string name="ZaLogsTitle">Логи</string>

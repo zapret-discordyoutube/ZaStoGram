@@ -350,6 +350,9 @@ public class SharedConfig {
     public static int mtProxyStartupCoverMode;
     public static volatile boolean wssTransportEnabled;
     public static boolean callRelayTcpTlsEnabled;
+    // ZaStoGram: mini apps and the in-app browser go through the first Naive entry of the proxy list even when the chats
+    // use another transport (WSS); a selected Naive entry always carries them.
+    public static boolean naiveWebAppsEnabled;
     public static int messageSeenHintCount;
     public static int emojiInteractionsHintCount;
     public static int dayNightThemeSwitchHintCount;
@@ -424,6 +427,11 @@ public class SharedConfig {
 
     public static void setCallRelayTcpTlsEnabled(boolean enabled) {
         callRelayTcpTlsEnabled = enabled;
+        saveConfig();
+    }
+
+    public static void setNaiveWebAppsEnabled(boolean enabled) {
+        naiveWebAppsEnabled = enabled;
         saveConfig();
     }
 
@@ -576,6 +584,7 @@ public class SharedConfig {
                 editor.putInt("mtProxyStartupCoverMode", mtProxyStartupCoverMode);
                 editor.putBoolean("wssTransportEnabled", wssTransportEnabled);
                 editor.putBoolean("callRelayTcpTlsEnabled", callRelayTcpTlsEnabled);
+                editor.putBoolean("naiveWebAppsEnabled", naiveWebAppsEnabled);
 
                 if (pendingAppUpdate != null) {
                     try {
@@ -689,6 +698,7 @@ public class SharedConfig {
             // сервер отдаёт как UDP, а дублирование их в TCP и TLS помогает только
             // там, где UDP режут, и ощутимо стоит в качестве связи.
             callRelayTcpTlsEnabled = preferences.getBoolean("callRelayTcpTlsEnabled", false);
+            naiveWebAppsEnabled = preferences.getBoolean("naiveWebAppsEnabled", false);
             String authKeyString = preferences.getString("pushAuthKey", null);
             if (!TextUtils.isEmpty(authKeyString)) {
                 pushAuthKey = Base64.decode(authKeyString, Base64.DEFAULT);
