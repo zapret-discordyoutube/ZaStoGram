@@ -129,8 +129,28 @@ public final class WarpEntry {
                 }
             }
             int last = -2;
+            long startedAt = System.currentTimeMillis();
+            int registrations = 1;
             while (current(mine)) {
                 final int state = native_state();
+                if (state == STATE_UP) {
+                    registrations = 1;
+                } else if (state == 0 && registrations < 4 && System.currentTimeMillis() - startedAt > 20000) {
+                    // A fresh account sometimes never gets an answer from the WARP edge (about 1 in 5); a new one usually
+                    // does. Accounts are throwaway, so drop this one and register again.
+                    FileLog.d("zsg_warp no answer from the edge in 20 s, registering a new account");
+                    registrations++;
+                    native_stop();
+                    prefs().edit().remove("private_key").remove("peer_public_key").remove("address").apply();
+                    while (current(mine) && !startTunnel()) {
+                        for (int i = 0; i < 30 && current(mine); i++) {
+                            Thread.sleep(1000);
+                        }
+                    }
+                    startedAt = System.currentTimeMillis();
+                    last = -2;
+                    continue;
+                }
                 if (state != last) {
                     FileLog.d("zsg_warp tunnel state " + state);
                     if (state == STATE_UP || last == STATE_UP) {
