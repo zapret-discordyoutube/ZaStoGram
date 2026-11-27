@@ -400,6 +400,12 @@
     <string name="NaiveWebAppsInfo">Мини-приложения и встроенный браузер идут через первый NaiveProxy-сервер из списка, даже когда чаты работают через WSS или другой транспорт. Если выбран Naive-прокси, они и так идут через него. Нужна запись NaiveProxy в списке.</string>
     <string name="WarpEntry">Cloudflare WARP как вход (экспериментально)</string>
     <string name="WarpEntryInfo">Включается отдельно. Первый хоп любого соединения (напрямую, MTProxy, WSS, Naive) идёт через Cloudflare WARP, а дальше трафик ведёт выбранный прокси. Там, где UDP режется, он переключается на WARP через TCP 443 (MASQUE). Если туннель не поднялся, соединения идут напрямую.</string>
+    <string name="WarpStatusOff">Выключено</string>
+    <string name="WarpStatusStarting">Регистрирую аккаунт WARP…</string>
+    <string name="WarpStatusConnecting">Подключаюсь (WireGuard, затем MASQUE по TCP 443)…</string>
+    <string name="WarpStatusWireGuard">Работает через WireGuard</string>
+    <string name="WarpStatusMasque">Работает через MASQUE (TCP 443)</string>
+    <string name="WarpStatusFailed">Cloudflare не отвечает в этой сети: соединения идут напрямую</string>
     <string name="CallRelayTcpTlsInfo">Дополнительно пробует релеи звонка по TCP и TLS, а не только по UDP. Помогает там, где UDP режут целиком. Эти маршруты используются, только если UDP не заработал, и заметно ухудшают качество связи.</string>
     <!-- ZaStoGram — экран логов -->
     <string name="ZaLogsTitle">Логи</string>

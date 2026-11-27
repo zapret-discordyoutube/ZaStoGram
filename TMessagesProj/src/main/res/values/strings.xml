@@ -11254,6 +11254,12 @@
     <string name="NaiveWebAppsInfo">Mini apps and the in-app browser go through the first NaiveProxy server in the list, even when chats use WSS or another transport. If a Naive proxy is selected, it carries them anyway. Needs a NaiveProxy entry in the list.</string>
     <string name="WarpEntry">Cloudflare WARP as the entry (experimental)</string>
     <string name="WarpEntryInfo">Opt-in. The first hop of every connection (direct, MTProxy, WSS, Naive) goes through Cloudflare WARP; the proxy still carries the traffic after it. Where UDP is blocked it falls back to WARP over TCP port 443 (MASQUE). If no tunnel comes up, connections stay direct.</string>
+    <string name="WarpStatusOff">Off</string>
+    <string name="WarpStatusStarting">Registering a WARP account…</string>
+    <string name="WarpStatusConnecting">Connecting (WireGuard, then MASQUE over TCP 443)…</string>
+    <string name="WarpStatusWireGuard">Up through WireGuard</string>
+    <string name="WarpStatusMasque">Up through MASQUE (TCP 443)</string>
+    <string name="WarpStatusFailed">No answer from Cloudflare on this network: connections go direct</string>
     <string name="CallRelayTcpTlsInfo">Also tries the call relays over TCP and TLS, not just UDP. Helps where UDP is blocked entirely. These routes are used only if UDP fails, and they noticeably degrade call quality.</string>
 
     <string name="Community">Community</string>

@@ -39,6 +39,30 @@ public final class WarpEntry {
     private static Thread worker;
     private static int generation;
     private static boolean initialized;
+    private static volatile boolean busyRegistering;
+
+    /** What the settings row shows: 0 off, 1 registering/starting, 2 connecting, 3 up through WireGuard, 4 up through MASQUE, 5 no answer. */
+    public static int status() {
+        if (!isEnabled()) {
+            return 0;
+        }
+        if (busyRegistering) {
+            return 1;
+        }
+        final int state;
+        try {
+            state = native_state();
+        } catch (Throwable t) {
+            return 1;
+        }
+        if (state == STATE_UP) {
+            return native_transport() == 2 ? 4 : 3;
+        }
+        if (state == 2) {
+            return 5;
+        }
+        return state == -1 ? 1 : 2;
+    }
 
     private WarpEntry() {
     }
@@ -184,9 +208,11 @@ public final class WarpEntry {
         final SharedPreferences preferences = prefs();
         final boolean haveWireGuard = !preferences.getString("private_key", "").isEmpty() && !preferences.getString("peer_public_key", "").isEmpty()
                 && !preferences.getString("address", "").isEmpty();
+        busyRegistering = true;
         boolean wireGuardOk = haveWireGuard || register(preferences);
         // The MASQUE account (a second device with an ECDSA key) is the fallback for networks that drop WireGuard's UDP.
         boolean masqueOk = !preferences.getString("masque_key", "").isEmpty() || enrollMasque(preferences);
+        busyRegistering = false;
         if (!wireGuardOk && !masqueOk) {
             return false;
         }

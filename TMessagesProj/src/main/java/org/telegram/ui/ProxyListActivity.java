@@ -1201,9 +1201,37 @@ public class ProxyListActivity extends BaseFragment implements NotificationCente
         DownloadController.getInstance(currentAccount).checkAutodownloadSettings();
     }
 
+    private final Runnable warpStatusRefresher = new Runnable() {
+        @Override
+        public void run() {
+            if (listAdapter != null && warpEntryRow >= 0) {
+                listAdapter.notifyItemChanged(warpEntryRow);
+            }
+            AndroidUtilities.runOnUIThread(this, 1500);
+        }
+    };
+
+    private String warpStatusText() {
+        switch (org.telegram.zastogram.naive.WarpEntry.status()) {
+            case 1:
+                return getString(R.string.WarpStatusStarting);
+            case 2:
+                return getString(R.string.WarpStatusConnecting);
+            case 3:
+                return getString(R.string.WarpStatusWireGuard);
+            case 4:
+                return getString(R.string.WarpStatusMasque);
+            case 5:
+                return getString(R.string.WarpStatusFailed);
+            default:
+                return getString(R.string.WarpStatusOff);
+        }
+    }
+
     @Override
     public void onResume() {
         super.onResume();
+        AndroidUtilities.runOnUIThread(warpStatusRefresher, 1500);
         markConnectedCurrentProxyIfNeeded();
         updateCurrentProxyStatusCell();
         startProxySpeedSampler();
@@ -1213,6 +1241,7 @@ public class ProxyListActivity extends BaseFragment implements NotificationCente
     @Override
     public void onPause() {
         super.onPause();
+        AndroidUtilities.cancelRunOnUIThread(warpStatusRefresher);
         stopProxySpeedSampler();
         ConnectionsManager.getInstance(currentAccount).setLivePingInterval(0);
     }
@@ -1393,7 +1422,7 @@ public class ProxyListActivity extends BaseFragment implements NotificationCente
                     } else if (position == naiveWebAppsRow) {
                         checkCell.setTextAndCheck(getString(R.string.NaiveWebApps), SharedConfig.naiveWebAppsEnabled, true);
                     } else if (position == warpEntryRow) {
-                        checkCell.setTextAndCheck(getString(R.string.WarpEntry), org.telegram.zastogram.naive.WarpEntry.isEnabled(), false);
+                        checkCell.setTextAndValueAndCheck(getString(R.string.WarpEntry), warpStatusText(), org.telegram.zastogram.naive.WarpEntry.isEnabled(), true, false);
                     }
                     break;
                 }
