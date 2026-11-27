@@ -135,10 +135,10 @@ public final class WarpEntry {
                 final int state = native_state();
                 if (state == STATE_UP) {
                     registrations = 1;
-                } else if (state == 0 && registrations < 4 && System.currentTimeMillis() - startedAt > 20000) {
+                } else if (state != STATE_UP && state != -1 && registrations < 4 && System.currentTimeMillis() - startedAt > 60000) {
                     // A fresh account sometimes never gets an answer from the WARP edge (about 1 in 5); a new one usually
                     // does. Accounts are throwaway, so drop this one and register again.
-                    FileLog.d("zsg_warp no answer from the edge in 20 s, registering a new account");
+                    FileLog.d("zsg_warp no answer from any edge in 60 s, registering a new account");
                     registrations++;
                     native_stop();
                     prefs().edit().remove("private_key").remove("peer_public_key").remove("address").apply();
