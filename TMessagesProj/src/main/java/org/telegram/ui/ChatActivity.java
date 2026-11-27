@@ -143,6 +143,7 @@ import com.google.zxing.common.detector.MathUtils;
 import org.telegram.PhoneFormat.PhoneFormat;
 import org.telegram.messenger.AccountInstance;
 import org.telegram.messenger.AndroidUtilities;
+import org.telegram.messenger.ProxyLinkHelper;
 import org.telegram.messenger.ApplicationLoader;
 import org.telegram.messenger.BotForumHelper;
 import org.telegram.messenger.BotInlineKeyboard;
@@ -38291,6 +38292,14 @@ public class ChatActivity extends BaseFragment implements
     }
 
     private void processExternalUrl(int type, String url, CharacterStyle span, ChatMessageCell cell, boolean forceAlert, boolean forceNoIV) {
+        if (ProxyLinkHelper.isNaiveUrl(url)) {
+            // ZaStoGram: a naive+https:// link opens the add-proxy dialog
+            ProxyLinkHelper.ProxyLink naiveLink = ProxyLinkHelper.parseNaiveUrl(url);
+            if (naiveLink != null && getParentActivity() != null) {
+                AndroidUtilities.showProxyAlert(getParentActivity(), naiveLink.toSettings());
+                return;
+            }
+        }
         try {
             String host = AndroidUtilities.getHostAuthority(url);
             if ((currentEncryptedChat == null || getMessagesController().secretWebpagePreview == 1) && getMessagesController().authDomains.contains(host)) {

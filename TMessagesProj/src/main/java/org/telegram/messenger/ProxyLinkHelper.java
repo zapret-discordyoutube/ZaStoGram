@@ -89,11 +89,82 @@ public final class ProxyLinkHelper {
         return firstFromText(text);
     }
 
+    private static final String NAIVE_URL_PREFIX = "naive+https://";
+
+    public static boolean isNaiveUrl(String text) {
+        return text != null && text.regionMatches(true, 0, NAIVE_URL_PREFIX, 0, NAIVE_URL_PREFIX.length());
+    }
+
+    /**
+     * naive+https://user:pass@host[:port][#name], the link format other NaiveProxy clients share.
+     * The name after '#' is not kept: a proxy entry has no name here.
+     */
+    public static ProxyLink parseNaiveUrl(String text) {
+        if (!isNaiveUrl(text)) {
+            return null;
+        }
+        String rest = trimQuery(text.substring(NAIVE_URL_PREFIX.length()));
+        int hash = rest.indexOf('#');
+        if (hash >= 0) {
+            rest = rest.substring(0, hash);
+        }
+        int end = rest.length();
+        for (int i = 0; i < rest.length(); i++) {
+            char ch = rest.charAt(i);
+            if (ch == '/' || ch == '?') {
+                end = i;
+                break;
+            }
+        }
+        String authority = rest.substring(0, end);
+        int at = authority.lastIndexOf('@');
+        String userInfo = at >= 0 ? authority.substring(0, at) : "";
+        String hostPort = at >= 0 ? authority.substring(at + 1) : authority;
+        String user = "";
+        String password = "";
+        if (!userInfo.isEmpty()) {
+            int colon = userInfo.indexOf(':');
+            user = decode(colon < 0 ? userInfo : userInfo.substring(0, colon));
+            password = colon < 0 ? "" : decode(userInfo.substring(colon + 1));
+        }
+        String host = hostPort;
+        int port = 443;
+        if (hostPort.startsWith("[")) {
+            int close = hostPort.indexOf(']');
+            if (close < 0) {
+                return null;
+            }
+            host = hostPort.substring(1, close);
+            String tail = hostPort.substring(close + 1);
+            if (tail.startsWith(":")) {
+                port = Utilities.parseInt(tail.substring(1));
+            }
+        } else {
+            int colon = hostPort.lastIndexOf(':');
+            if (colon >= 0) {
+                host = hostPort.substring(0, colon);
+                port = Utilities.parseInt(hostPort.substring(colon + 1));
+            }
+        }
+        host = normalizeAddress(host);
+        if (TextUtils.isEmpty(host) || port <= 0 || port > 65535) {
+            return null;
+        }
+        return new ProxyLink(TYPE_NAIVE, host, port, user, password, "");
+    }
+
     public static ProxyLink firstFromText(String text) {
         if (TextUtils.isEmpty(text)) {
             return null;
         }
         String lower = text.toLowerCase(Locale.US);
+        int naiveUrl = lower.indexOf(NAIVE_URL_PREFIX);
+        if (naiveUrl >= 0) {
+            ProxyLink link = parseNaiveUrl(text.substring(naiveUrl));
+            if (link != null) {
+                return link;
+            }
+        }
         LinkPrefix foundPrefix = null;
         int foundIndex = -1;
         for (LinkPrefix prefix : LINK_PREFIXES) {

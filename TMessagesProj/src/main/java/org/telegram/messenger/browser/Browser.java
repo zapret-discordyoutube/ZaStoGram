@@ -23,6 +23,7 @@ import android.text.TextUtils;
 
 import org.telegram.messenger.AccountInstance;
 import org.telegram.messenger.AndroidUtilities;
+import org.telegram.messenger.ProxyLinkHelper;
 import org.telegram.messenger.ApplicationLoader;
 import org.telegram.messenger.BuildVars;
 import org.telegram.messenger.CustomTabsCopyReceiver;
@@ -365,6 +366,15 @@ public class Browser {
     public static void openUrl(final Context context, Uri uri, boolean _allowCustom, boolean tryTelegraph, boolean forceNotInternalForApps, Progress inCaseLoading, String browser, boolean allowIntent, boolean allowInAppBrowser, boolean forceRequest, boolean keepWebAuthTokens) {
         if (context == null || uri == null) {
             return;
+        }
+        if (ProxyLinkHelper.isNaiveUrl(uri.toString())) {
+            // ZaStoGram: a naive+https:// link opens the add-proxy dialog
+            ProxyLinkHelper.ProxyLink naiveLink = ProxyLinkHelper.parseNaiveUrl(uri.toString());
+            Activity naiveActivity = AndroidUtilities.findActivity(context);
+            if (naiveLink != null && naiveActivity != null) {
+                AndroidUtilities.showProxyAlert(naiveActivity, naiveLink.toSettings());
+                return;
+            }
         }
         if (!keepWebAuthTokens) {
             uri = withoutWebAuthTokens(uri);

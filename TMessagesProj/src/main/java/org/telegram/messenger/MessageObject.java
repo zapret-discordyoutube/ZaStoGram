@@ -8319,6 +8319,12 @@ public class MessageObject {
     }
 
     public static boolean addEntitiesToText(CharSequence text, ArrayList<TLRPC.MessageEntity> entities, boolean out, boolean usernames, boolean photoViewer, boolean useManualParse, int allowed) {
+        boolean result = addEntitiesToTextInternal(text, entities, out, usernames, photoViewer, useManualParse, allowed);
+        // ZaStoGram: naive+https:// proxy links are not links to the generic detection
+        return text instanceof Spannable && org.telegram.zastogram.naive.NaiveLinks.apply((Spannable) text) || result;
+    }
+
+    private static boolean addEntitiesToTextInternal(CharSequence text, ArrayList<TLRPC.MessageEntity> entities, boolean out, boolean usernames, boolean photoViewer, boolean useManualParse, int allowed) {
         if (!(text instanceof Spannable)) {
             return false;
         }
