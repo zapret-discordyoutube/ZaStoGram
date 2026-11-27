@@ -68,6 +68,10 @@ public final class ForgejoUpdaterController {
     private float downloadingProgress;
     private HttpGetFileTask downloadingTask;
     private List<String> downloadHosts = new ArrayList<>();
+    private boolean channelRouteTried;
+    private boolean channelRouteActive;
+    private static final long STALL_CHECK_MS = 40_000L;
+    private static final long STALL_MIN_BYTES = 300L * 1024L;
     private int downloadHostIndex;
 
     private ForgejoUpdaterController() {
@@ -672,6 +676,7 @@ public final class ForgejoUpdaterController {
     public void downloadUpdate() {
         downloadHosts = ZaStoGitMirrors.hosts();
         downloadHostIndex = 0;
+        channelRouteTried = false;
         downloadUpdate(false);
     }
 
@@ -744,9 +749,45 @@ public final class ForgejoUpdaterController {
             downloadHostIndex = 0;
         }
         downloadingTask.execute(ZaStoGitMirrors.withHost(fileUrl, downloadHosts.get(downloadHostIndex)));
+        watchForStall(partialFile, partialFile.length(), requestedReleaseId, requestedAssetId);
+    }
+
+    /**
+     * A throttled host neither fails nor finishes: the download crawls at a few KB/s for as long as the user waits. If the
+     * partial file grew by less than STALL_MIN_BYTES in STALL_CHECK_MS, the HTTP task is stopped (the prefix is kept) and the
+     * channel route takes over.
+     */
+    private void watchForStall(File partialFile, long startLength, long requestedReleaseId, long requestedAssetId) {
+        final HttpGetFileTask watched = downloadingTask;
+        AndroidUtilities.runOnUIThread(() -> {
+            if (!downloading || downloadingTask != watched || watched == null || channelRouteTried
+                    || releaseId != requestedReleaseId || assetId != requestedAssetId) {
+                return;
+            }
+            if (partialFile.length() - startLength >= STALL_MIN_BYTES) {
+                watchForStall(partialFile, partialFile.length(), requestedReleaseId, requestedAssetId);
+                return;
+            }
+            FileLog.d("zasto_update http_stalled bytes=" + (partialFile.length() - startLength) + ", trying the channel");
+            watched.cancel(true);
+            downloadingTask = null;
+            downloading = false;
+            if (!tryChannelRoute()) {
+                downloadingProgress = getCachedDownloadProgress();
+                NotificationCenter.getGlobalInstance().postNotificationName(NotificationCenter.appUpdateAvailable);
+            }
+        }, STALL_CHECK_MS);
     }
 
     private void onDownloadFinished(File downloadedFile, long requestedReleaseId, long requestedAssetId) {
+        onDownloadFinished(downloadedFile, requestedReleaseId, requestedAssetId, false);
+    }
+
+    private void onDownloadFinished(File downloadedFile, long requestedReleaseId, long requestedAssetId, boolean fromChannel) {
+        if (!fromChannel && channelRouteActive) {
+            return;  // a cancelled HTTP task reporting after the channel route took over
+        }
+        channelRouteActive = false;
         downloading = false;
         downloadingTask = null;
         if (releaseId != requestedReleaseId || assetId != requestedAssetId) {
@@ -771,7 +812,7 @@ public final class ForgejoUpdaterController {
                 && assetSize > 0L && downloadedFile.length() < assetSize) {
             // Some HTTP stacks report a clean EOF instead of throwing when the
             // connection disappears. This is still a resumable partial file.
-            if (continueOnNextMirror()) {
+            if (continueOnNextMirror() || tryChannelRoute()) {
                 return;
             }
             downloadingProgress = getCachedDownloadProgress();
@@ -783,7 +824,7 @@ public final class ForgejoUpdaterController {
         } else {
             // Network failures leave the deterministic .part file in cache. A
             // later attempt, including after app restart, resumes that file.
-            if (continueOnNextMirror()) {
+            if (continueOnNextMirror() || tryChannelRoute()) {
                 return;
             }
             downloadingProgress = getCachedDownloadProgress();
@@ -794,6 +835,59 @@ public final class ForgejoUpdaterController {
             }
         }
         NotificationCenter.getGlobalInstance().postNotificationName(NotificationCenter.appUpdateAvailable);
+    }
+
+    /**
+     * Every Forgejo/GitHub host failed: the same APK is a document in the project channel, which Telegram's own connection
+     * (and so the selected proxy or WSS route) can download. Only once per download attempt.
+     */
+    private boolean tryChannelRoute() {
+        if (channelRouteTried || TextUtils.isEmpty(releaseTag) || TextUtils.isEmpty(fileUrl)) {
+            return false;
+        }
+        File partialFile = getPartialDownloadFile();
+        String assetName = android.net.Uri.parse(fileUrl).getLastPathSegment();
+        if (partialFile == null || TextUtils.isEmpty(assetName)) {
+            return false;
+        }
+        channelRouteTried = true;
+        channelRouteActive = true;
+        final long requestedReleaseId = releaseId;
+        final long requestedAssetId = assetId;
+        downloading = true;
+        downloadingProgress = 0.0f;
+        NotificationCenter.getGlobalInstance().postNotificationName(NotificationCenter.appUpdateLoading);
+        boolean started = ZaStoChannelUpdate.download(releaseTag, assetName, partialFile, new ZaStoChannelUpdate.Callback() {
+            @Override
+            public void onProgress(float progress) {
+                if (!downloading || releaseId != requestedReleaseId || assetId != requestedAssetId) {
+                    return;
+                }
+                downloadingProgress = progress;
+                NotificationCenter.getGlobalInstance().postNotificationName(NotificationCenter.appUpdateLoading);
+            }
+
+            @Override
+            public void onDone(File file) {
+                if (file == null) {
+                    channelRouteActive = false;
+                    downloading = false;
+                    downloadingProgress = getCachedDownloadProgress();
+                    FileLog.e("zasto_update channel_route gave nothing");
+                    NotificationCenter.getGlobalInstance().postNotificationName(NotificationCenter.appUpdateAvailable);
+                    return;
+                }
+                FileLog.d("zasto_update channel_route done size=" + file.length());
+                onDownloadFinished(file, requestedReleaseId, requestedAssetId, true);
+            }
+        });
+        if (!started) {
+            channelRouteActive = false;
+            downloading = false;
+            downloadingProgress = getCachedDownloadProgress();
+            return false;
+        }
+        return true;
     }
 
     /** The partial file is the same on every mirror, so the next one simply resumes it. */
@@ -829,6 +923,7 @@ public final class ForgejoUpdaterController {
             downloadingTask.cancel(true);
             downloadingTask = null;
         }
+        ZaStoChannelUpdate.cancel();
         downloading = false;
         downloadingProgress = getCachedDownloadProgress();
         NotificationCenter.getGlobalInstance().postNotificationName(NotificationCenter.appUpdateAvailable);
