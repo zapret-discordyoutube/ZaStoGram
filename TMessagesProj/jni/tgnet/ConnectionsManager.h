@@ -104,6 +104,8 @@ public:
 #endif
 
     void reconnect(int32_t datacentrId, int32_t connectionType);
+    // ZaStoGram: the WARP entry hop came up or went away: connections opened before keep the old first hop, so restart them.
+    void warpEntryChanged();
     void failNotRunningRequest(int32_t token);
     void receivedIntegrityCheckClassic(int32_t requestToken, std::string nonce, std::string token);
     void receivedCaptchaResult(int32_t requestToken, int32_t generation, std::string token);

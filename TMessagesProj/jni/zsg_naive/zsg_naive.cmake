@@ -41,6 +41,7 @@ set_target_properties(zsgnaive PROPERTIES
 add_dependencies(zsgnaive zsg_naive_ext)
 
 add_library(zsg_naive_socket STATIC ${CMAKE_CURRENT_LIST_DIR}/NaiveSocket.cpp ${CMAKE_CURRENT_LIST_DIR}/TrustRoots.cpp
-        ${CMAKE_CURRENT_LIST_DIR}/WebProxy.cpp ${CMAKE_CURRENT_LIST_DIR}/WebProxyJni.cpp)
+        ${CMAKE_CURRENT_LIST_DIR}/WebProxy.cpp ${CMAKE_CURRENT_LIST_DIR}/WebProxyJni.cpp
+        ${CMAKE_CURRENT_LIST_DIR}/WarpEntry.cpp)
 target_link_libraries(zsg_naive_socket PUBLIC zsgnaive)
 target_include_directories(zsg_naive_socket PUBLIC ${CMAKE_CURRENT_LIST_DIR}/.. ${CMAKE_CURRENT_LIST_DIR}/../third_party/boringssl/include ${CMAKE_CURRENT_LIST_DIR}/../voip/webrtc)

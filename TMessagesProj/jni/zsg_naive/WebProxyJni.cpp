@@ -2,6 +2,7 @@
 
 #include <string>
 
+#include "WarpEntry.h"
 #include "WebProxy.h"
 
 namespace tgnet {
@@ -47,7 +48,10 @@ bool RegisterWebProxyJni(JNIEnv *env) {
     if (clazz == nullptr) {
         return false;
     }
-    return env->RegisterNatives(clazz, kMethods, sizeof(kMethods) / sizeof(kMethods[0])) >= 0;
+    if (env->RegisterNatives(clazz, kMethods, sizeof(kMethods) / sizeof(kMethods[0])) < 0) {
+        return false;
+    }
+    return RegisterWarpJni(env);
 }
 
 } // namespace naive

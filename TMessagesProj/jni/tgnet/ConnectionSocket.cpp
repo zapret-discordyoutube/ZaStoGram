@@ -37,6 +37,7 @@
 #include "ConnectionsManager.h"
 #include "EventObject.h"
 #include "../zsg_naive/NaiveSocket.h"
+#include "../zsg_naive/WarpEntry.h"
 #include "NativeByteBuffer.h"
 #include "Timer.h"
 #include "BuffersStorage.h"
@@ -3923,6 +3924,11 @@ void ConnectionSocket::openConnectionInternal(bool ipv6) {
                 ? reinterpret_cast<const sockaddr *>(&socketAddress6)
                 : reinterpret_cast<const sockaddr *>(&socketAddress);
         const socklen_t addressLength = ipv6 ? sizeof(socketAddress6) : sizeof(socketAddress);
+        // ZaStoGram WARP entry hop (opt-in): the first hop goes to a loopback port that the tunnel carries on.
+        sockaddr_in warpAddress;
+        if (!ipv6 && tgnet::naive::WarpRedirect(socketAddress, &warpAddress)) {
+            address = reinterpret_cast<const sockaddr *>(&warpAddress);
+        }
         // A spare from the pool has already done TCP, TLS and the upgrade; its
         // first EPOLLOUT below goes straight to on_connected.
         std::unique_ptr<tgnet::wss::Socket> pooled = (ipv6 || std::strcmp(currentWssTransport->transportName(), "naive") == 0)
@@ -4016,7 +4022,12 @@ void ConnectionSocket::openConnectionInternal(bool ipv6) {
         closeSocket(1, -1);
         return;
     }
-    if (!stateMachine.connectNativeSocket((ipv6 ? (sockaddr *) &socketAddress6 : (sockaddr *) &socketAddress), (socklen_t) (ipv6 ? sizeof(sockaddr_in6) : sizeof(sockaddr_in)))) {
+    sockaddr_in warpPlainAddress;
+    sockaddr *plainAddress = ipv6 ? (sockaddr *) &socketAddress6 : (sockaddr *) &socketAddress;
+    if (!ipv6 && tgnet::naive::WarpRedirect(socketAddress, &warpPlainAddress)) {  // ZaStoGram WARP entry hop (opt-in)
+        plainAddress = (sockaddr *) &warpPlainAddress;
+    }
+    if (!stateMachine.connectNativeSocket(plainAddress, (socklen_t) (ipv6 ? sizeof(sockaddr_in6) : sizeof(sockaddr_in)))) {
         closeSocket(1, -1);
     } else {
         eventMask.events = EPOLLOUT | EPOLLIN | EPOLLRDHUP | EPOLLERR | EPOLLET;

@@ -6,6 +6,7 @@
 #include "WssPool.h"
 #include "../EventObject.h"
 #include "../FileLog.h"
+#include "../../zsg_naive/WarpEntry.h"
 
 #include <arpa/inet.h>
 #include <netinet/in.h>
@@ -260,6 +261,10 @@ void Pool::open(const std::string &key, Demand &demand, int64_t now) {
     entry->socket = std::make_unique<Socket>(demand.route);
     entry->socket->setSpeculative(true);
     std::string diagnostic;
+    struct sockaddr_in warpAddress;
+    if (tgnet::naive::WarpRedirect(address, &warpAddress)) {  // ZaStoGram WARP entry hop (opt-in)
+        address = warpAddress;
+    }
     if (!entry->socket->open(reinterpret_cast<const struct sockaddr *>(&address), sizeof(address), &diagnostic)) {
         demand.backoffMs = std::min(kMaxBackoffMs, std::max(kMinBackoffMs, demand.backoffMs * 2));
         demand.nextOpenAt = now + demand.backoffMs;

@@ -975,6 +975,7 @@ public class ConnectionsManager extends BaseController {
                 native_setProxySettings(currentAccount, proxyAddress, proxyPort, proxyUsername, proxyPassword, proxySecret, MtProxyOptions.resolve(proxyAddress, proxyPort, proxySecret), activationGeneration, ProxyConnectionEvent.Origin.STARTUP_RESTORE.wireName);
             }
         }
+        org.telegram.zastogram.naive.WarpEntry.init();  // ZaStoGram: opt-in Cloudflare WARP entry hop
         applyWssTransport(legacyProxyEnabled);
         if (!legacyProxyEnabled || proxySettings.getType() != ProxySettings.Type.NAIVE) {
             org.telegram.zastogram.naive.NaiveWebProxy.apply(null);  // ZaStoGram: mini apps through a Naive entry while the chats use another transport

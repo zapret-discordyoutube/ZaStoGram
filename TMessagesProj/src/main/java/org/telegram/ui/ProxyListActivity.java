@@ -157,6 +157,7 @@ public class ProxyListActivity extends BaseFragment implements NotificationCente
     private int wssTransportRow;
     private int callRelayTcpTlsRow;
     private int naiveWebAppsRow;
+    private int warpEntryRow;
     private int wssTransportInfoRow;
     private int deleteAllRow;
 
@@ -633,6 +634,10 @@ public class ProxyListActivity extends BaseFragment implements NotificationCente
                 SharedConfig.setNaiveWebAppsEnabled(enabled);
                 ((TextCheckCell) view).setChecked(enabled);
                 org.telegram.zastogram.naive.NaiveWebProxy.apply(useProxySettings && SharedConfig.currentProxy != null ? SharedConfig.currentProxy.settings : null);
+            } else if (position == warpEntryRow) {
+                boolean enabled = !org.telegram.zastogram.naive.WarpEntry.isEnabled();
+                org.telegram.zastogram.naive.WarpEntry.setEnabled(enabled);
+                ((TextCheckCell) view).setChecked(enabled);
             } else if (position >= proxyStartRow && position < proxyEndRow) {
                 if (!selectedItems.isEmpty()) {
                     listAdapter.toggleSelected(position);
@@ -961,6 +966,7 @@ public class ProxyListActivity extends BaseFragment implements NotificationCente
         wssTransportRow = rowCount++;
         callRelayTcpTlsRow = rowCount++;
         naiveWebAppsRow = rowCount++;
+        warpEntryRow = rowCount++;
         wssTransportInfoRow = rowCount++;
         connectionsHeaderRow = rowCount++;
 
@@ -1385,7 +1391,9 @@ public class ProxyListActivity extends BaseFragment implements NotificationCente
                     } else if (position == callRelayTcpTlsRow) {
                         checkCell.setTextAndCheck(getString(R.string.CallRelayTcpTls), SharedConfig.callRelayTcpTlsEnabled, true);
                     } else if (position == naiveWebAppsRow) {
-                        checkCell.setTextAndCheck(getString(R.string.NaiveWebApps), SharedConfig.naiveWebAppsEnabled, false);
+                        checkCell.setTextAndCheck(getString(R.string.NaiveWebApps), SharedConfig.naiveWebAppsEnabled, true);
+                    } else if (position == warpEntryRow) {
+                        checkCell.setTextAndCheck(getString(R.string.WarpEntry), org.telegram.zastogram.naive.WarpEntry.isEnabled(), false);
                     }
                     break;
                 }
@@ -1408,7 +1416,7 @@ public class ProxyListActivity extends BaseFragment implements NotificationCente
                     } else if (position == mtProxyStartupCoverInfoRow) {
                         cell.setText(getString(R.string.MtProxyStartupCoverInfo));
                     } else if (position == wssTransportInfoRow) {
-                        cell.setText(getString(R.string.WssTransportInfo) + "\n\n" + getString(R.string.CallRelayTcpTlsInfo) + "\n\n" + getString(R.string.NaiveWebAppsInfo));
+                        cell.setText(getString(R.string.WssTransportInfo) + "\n\n" + getString(R.string.CallRelayTcpTlsInfo) + "\n\n" + getString(R.string.NaiveWebAppsInfo) + "\n\n" + getString(R.string.WarpEntryInfo));
                     }
                     break;
                 }
@@ -1526,6 +1534,8 @@ public class ProxyListActivity extends BaseFragment implements NotificationCente
                     checkCell.setChecked(SharedConfig.callRelayTcpTlsEnabled);
                 } else if (position == naiveWebAppsRow) {
                     checkCell.setChecked(SharedConfig.naiveWebAppsEnabled);
+                } else if (position == warpEntryRow) {
+                    checkCell.setChecked(org.telegram.zastogram.naive.WarpEntry.isEnabled());
                 }
             } else {
                 super.onBindViewHolder(holder, position, payloads);
@@ -1552,6 +1562,8 @@ public class ProxyListActivity extends BaseFragment implements NotificationCente
                     checkCell.setChecked(SharedConfig.callRelayTcpTlsEnabled);
                 } else if (position == naiveWebAppsRow) {
                     checkCell.setChecked(SharedConfig.naiveWebAppsEnabled);
+                } else if (position == warpEntryRow) {
+                    checkCell.setChecked(org.telegram.zastogram.naive.WarpEntry.isEnabled());
                 }
             }
         }
@@ -1559,7 +1571,7 @@ public class ProxyListActivity extends BaseFragment implements NotificationCente
         @Override
         public boolean isEnabled(RecyclerView.ViewHolder holder) {
             int position = holder.getAdapterPosition();
-            return position == useProxyRow || position == rotationRow || position == tlsProfileRow || position == clientHelloFragmentationRow || position == mtProxySoftMuxRow || position == mtProxyConnectionPatternRow || position == mtProxyRecordSizingRow || position == mtProxyTimingRow || position == mtProxyStartupCoverRow || position == wssTransportRow || position == callRelayTcpTlsRow || position == naiveWebAppsRow || position == proxyAddRow || position == deleteAllRow || position >= proxyStartRow && position < proxyEndRow;
+            return position == useProxyRow || position == rotationRow || position == tlsProfileRow || position == clientHelloFragmentationRow || position == mtProxySoftMuxRow || position == mtProxyConnectionPatternRow || position == mtProxyRecordSizingRow || position == mtProxyTimingRow || position == mtProxyStartupCoverRow || position == wssTransportRow || position == callRelayTcpTlsRow || position == naiveWebAppsRow || position == warpEntryRow || position == proxyAddRow || position == deleteAllRow || position >= proxyStartRow && position < proxyEndRow;
         }
 
         @Override
@@ -1655,6 +1667,8 @@ public class ProxyListActivity extends BaseFragment implements NotificationCente
                 return -31;
             } else if (position == naiveWebAppsRow) {
                 return -32;
+            } else if (position == warpEntryRow) {
+                return -33;
             } else if (position == wssTransportInfoRow) {
                 return -26;
             } else if (position >= proxyStartRow && position < proxyEndRow) {
@@ -1670,7 +1684,7 @@ public class ProxyListActivity extends BaseFragment implements NotificationCente
                 return VIEW_TYPE_SHADOW;
             } else if (position == proxyAddRow || position == deleteAllRow) {
                 return VIEW_TYPE_TEXT_SETTING;
-            } else if (position == useProxyRow || position == rotationRow || position == clientHelloFragmentationRow || position == mtProxySoftMuxRow || position == wssTransportRow || position == callRelayTcpTlsRow || position == naiveWebAppsRow) {
+            } else if (position == useProxyRow || position == rotationRow || position == clientHelloFragmentationRow || position == mtProxySoftMuxRow || position == wssTransportRow || position == callRelayTcpTlsRow || position == naiveWebAppsRow || position == warpEntryRow) {
                 return VIEW_TYPE_TEXT_CHECK;
             } else if (position == connectionsHeaderRow || position == wssTransportHeaderRow) {
                 return VIEW_TYPE_HEADER;

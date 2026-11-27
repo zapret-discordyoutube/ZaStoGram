@@ -11252,6 +11252,8 @@
     <string name="CallRelayTcpTls">Calls over TCP/TLS (experimental)</string>
     <string name="NaiveWebApps">Mini apps through Naive</string>
     <string name="NaiveWebAppsInfo">Mini apps and the in-app browser go through the first NaiveProxy server in the list, even when chats use WSS or another transport. If a Naive proxy is selected, it carries them anyway. Needs a NaiveProxy entry in the list.</string>
+    <string name="WarpEntry">Cloudflare WARP as the entry (experimental)</string>
+    <string name="WarpEntryInfo">Opt-in. The first hop of every connection (direct, MTProxy, WSS, Naive) goes through Cloudflare WARP; the proxy still carries the traffic after it. If the tunnel does not come up, connections stay direct.</string>
     <string name="CallRelayTcpTlsInfo">Also tries the call relays over TCP and TLS, not just UDP. Helps where UDP is blocked entirely. These routes are used only if UDP fails, and they noticeably degrade call quality.</string>
 
     <string name="Community">Community</string>

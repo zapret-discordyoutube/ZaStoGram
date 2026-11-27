@@ -4674,6 +4674,12 @@ void ConnectionsManager::useJavaVM(JavaVM *vm, bool useJavaByteBuffers) {
     }
 }
 
+void ConnectionsManager::warpEntryChanged() {
+    scheduleTask([&] {
+        requestTransportSettingsReconnect("warp_entry_changed");
+    });
+}
+
 void ConnectionsManager::reconnect(int32_t dcId, int32_t connectionType) {
     scheduleTask([&, dcId, connectionType] {
         scheduleTask([&, dcId, connectionType] {
