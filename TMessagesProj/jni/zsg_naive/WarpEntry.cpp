@@ -70,18 +70,24 @@ jobjectArray nativeKeypair(JNIEnv *env, jclass) {
 }
 
 jboolean nativeStart(JNIEnv *env, jclass, jstring privateKey, jstring peerKey, jstring reserved, jstring address,
-                     jstring endpointHost, jint endpointPort) {
+                     jstring endpointHost, jint endpointPort, jstring masqueKey, jstring masquePem, jstring masqueAddress,
+                     jboolean masqueFirst) {
     const std::string priv = ToString(env, privateKey);
     const std::string peer = ToString(env, peerKey);
     const std::string reservedBytes = ToString(env, reserved);
     const std::string interfaceAddress = ToString(env, address);
     const std::string host = ToString(env, endpointHost);
+    const std::string mKey = ToString(env, masqueKey);
+    const std::string mPem = ToString(env, masquePem);
+    const std::string mAddress = ToString(env, masqueAddress);
     std::lock_guard<std::mutex> lock(warpMutex);
     if (warpHandle != nullptr) {
         zsg_warp_stop(warpHandle);
         warpHandle = nullptr;
     }
     warpStateCache = ZSG_WARP_CONNECTING;
+    const bool haveWireGuard = !priv.empty() && !peer.empty() && !interfaceAddress.empty() && !host.empty();
+    const bool haveMasque = !mKey.empty() && !mPem.empty() && !mAddress.empty();
     zsg_warp_config config = {};
     config.private_key = priv.c_str();
     config.peer_public_key = peer.c_str();
@@ -90,14 +96,52 @@ jboolean nativeStart(JNIEnv *env, jclass, jstring privateKey, jstring peerKey, j
     config.endpoint_host = host.c_str();
     config.endpoint_port = static_cast<uint16_t>(endpointPort > 0 && endpointPort < 65536 ? endpointPort : 2408);
     config.junk_count = 3;
+    zsg_warp_masque_config masque = {};
+    masque.private_key = mKey.c_str();
+    masque.server_key_pem = mPem.c_str();
+    masque.address = mAddress.c_str();
+    masque.edges = nullptr;  // the built-in list of HTTP/2 edges
+    masque.first = masqueFirst ? 1 : 0;
     uint16_t socksPort = 0;
     char error[256] = {0};
-    warpHandle = zsg_warp_start(&config, &socksPort, error, sizeof(error));
+    if (haveWireGuard || haveMasque) {
+        warpHandle = zsg_warp_start2(haveWireGuard ? &config : nullptr, haveMasque ? &masque : nullptr, &socksPort, error,
+                                     sizeof(error));
+    }
     if (warpHandle == nullptr) {
         warpStateCache = ZSG_WARP_FAILED;
         return JNI_FALSE;
     }
     return JNI_TRUE;
+}
+
+jobjectArray nativeMasqueKeypair(JNIEnv *env, jclass) {
+    char priv[512] = {0};
+    char pub[512] = {0};
+    if (!zsg_warp_masque_keypair(priv, pub, sizeof(priv))) {
+        return nullptr;
+    }
+    jclass stringClass = env->FindClass("java/lang/String");
+    jobjectArray result = env->NewObjectArray(2, stringClass, nullptr);
+    env->SetObjectArrayElement(result, 0, env->NewStringUTF(priv));
+    env->SetObjectArrayElement(result, 1, env->NewStringUTF(pub));
+    return result;
+}
+
+jint nativeTransport(JNIEnv *, jclass) {
+    std::lock_guard<std::mutex> lock(warpMutex);
+    return warpHandle == nullptr ? 0 : zsg_warp_transport(warpHandle);
+}
+
+jstring nativeStats(JNIEnv *env, jclass) {
+    char text[300] = {0};
+    {
+        std::lock_guard<std::mutex> lock(warpMutex);
+        if (warpHandle != nullptr) {
+            zsg_warp_stats(warpHandle, text, sizeof(text));
+        }
+    }
+    return env->NewStringUTF(text);
 }
 
 jint nativeState(JNIEnv *, jclass) {
@@ -129,8 +173,13 @@ void nativeReconnect(JNIEnv *, jclass, jint account) {
 const JNINativeMethod kMethods[] = {
     {"native_reconnect", "(I)V", reinterpret_cast<void *>(nativeReconnect)},
     {"native_keypair", "()[Ljava/lang/String;", reinterpret_cast<void *>(nativeKeypair)},
-    {"native_start", "(Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;I)Z",
+    {"native_start",
+     "(Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;ILjava/lang/String;Ljava/lang/String;"
+     "Ljava/lang/String;Z)Z",
      reinterpret_cast<void *>(nativeStart)},
+    {"native_masqueKeypair", "()[Ljava/lang/String;", reinterpret_cast<void *>(nativeMasqueKeypair)},
+    {"native_transport", "()I", reinterpret_cast<void *>(nativeTransport)},
+    {"native_stats", "()Ljava/lang/String;", reinterpret_cast<void *>(nativeStats)},
     {"native_state", "()I", reinterpret_cast<void *>(nativeState)},
     {"native_stop", "()V", reinterpret_cast<void *>(nativeStop)},
 };
