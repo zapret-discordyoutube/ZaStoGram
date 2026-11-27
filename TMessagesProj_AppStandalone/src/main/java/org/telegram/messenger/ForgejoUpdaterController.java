@@ -240,6 +240,11 @@ public final class ForgejoUpdaterController {
                 + " force=" + force
                 + " url=" + getReleasesUrl());
         checkingForUpdate = true;
+        if ("1".equals(testSetting("channel_only"))) {
+            FileLog.d("zasto_update test seam: channel only");
+            checkViaChannel();
+            return;
+        }
         requestReleases(ZaStoGitMirrors.hosts(), 0, false);
     }
 
@@ -541,11 +546,49 @@ public final class ForgejoUpdaterController {
                 : installedReleaseTag;
     }
 
+    /**
+     * Test seam, dev channel only: a text file zsg_update_test in the app's external files directory (writable over adb)
+     * with the lines "channel_only=1" (skip the git hosts, check through the channel) and "installed_build=N" (pretend this
+     * is build N). Without the file nothing changes. It lets the channel route be exercised on a phone that does reach git.
+     */
+    private static String testSetting(String key) {
+        if (!isDevChannel()) {
+            return null;
+        }
+        try {
+            File dir = ApplicationLoader.applicationContext.getExternalFilesDir(null);
+            File file = dir == null ? null : new File(dir, "zsg_update_test");
+            if (file == null || !file.isFile() || file.length() > 4096) {
+                return null;
+            }
+            try (java.io.BufferedReader reader = new java.io.BufferedReader(new java.io.FileReader(file))) {
+                for (String line; (line = reader.readLine()) != null; ) {
+                    if (line.startsWith(key + "=")) {
+                        return line.substring(key.length() + 1).trim();
+                    }
+                }
+            }
+        } catch (Exception ignore) {
+        }
+        return null;
+    }
+
     private static String getEmbeddedReleaseTag() {
+        String fake = testSetting("installed_build");
+        if (!TextUtils.isEmpty(fake)) {
+            return "zastogram-apk-" + fake + "-1";
+        }
         return ApplicationLoader.applicationContext.getString(org.telegram.messenger.web.R.string.ZastoReleaseTag);
     }
 
     private static int getEmbeddedBuildNumber() {
+        String fake = testSetting("installed_build");
+        if (!TextUtils.isEmpty(fake)) {
+            try {
+                return Integer.parseInt(fake);
+            } catch (NumberFormatException ignore) {
+            }
+        }
         return ApplicationLoader.applicationContext.getResources().getInteger(org.telegram.messenger.web.R.integer.ZastoBuildNumber);
     }
 
