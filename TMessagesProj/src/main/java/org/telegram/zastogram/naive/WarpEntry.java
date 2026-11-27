@@ -40,6 +40,8 @@ public final class WarpEntry {
     private static int generation;
     private static boolean initialized;
     private static volatile boolean busyRegistering;
+    private static volatile boolean enrollingMasque;
+    private static long lastEnrollTry;
 
     /** What the settings row shows: 0 off, 1 registering/starting, 2 connecting, 3 up through WireGuard, 4 up through MASQUE, 5 no answer. */
     public static int status() {
@@ -76,6 +78,9 @@ public final class WarpEntry {
 
     /** 0 none yet, 1 WireGuard, 2 MASQUE. */
     private static native int native_transport();
+
+    /** The engine's loopback SOCKS5 port, 0 when it is not running. */
+    private static native int native_socksPort();
 
     private static native String native_stats();
 
@@ -167,6 +172,7 @@ public final class WarpEntry {
             int registrations = 1;
             while (current(mine)) {
                 final int state = native_state();
+                maybeEnrollMasque(mine, state);
                 if (state == STATE_UP) {
                     registrations = 1;
                     final boolean masque = native_transport() == 2;  // remember which transport works on this network
@@ -191,6 +197,9 @@ public final class WarpEntry {
                     continue;
                 }
                 if (state != last) {
+                    if (state == STATE_UP) {
+                        lastEnrollTry = 0;  // the tunnel reaches the API even where the provider does not: try the enrollment now
+                    }
                     FileLog.d("zsg_warp tunnel state " + state + " transport " + native_transport() + " " + native_stats());
                     if (state == STATE_UP || last == STATE_UP) {
                         reconnectAll();  // connections made before the tunnel was up went out directly
@@ -204,6 +213,35 @@ public final class WarpEntry {
         }
     }
 
+    /**
+     * The MASQUE fallback needs its own WARP device. It is enrolled in the background: directly while the tunnel is not up,
+     * through the tunnel once it is (the provider drops the API by name on some networks, a tunnel that is up reaches it from
+     * inside Cloudflare). A new account while no tunnel is up restarts the engine with it. Tries again every 5 minutes.
+     */
+    private static void maybeEnrollMasque(final int mine, final int state) {
+        if (!prefs().getString("masque_key", "").isEmpty() || enrollingMasque || System.currentTimeMillis() - lastEnrollTry < 300000) {
+            return;
+        }
+        enrollingMasque = true;
+        lastEnrollTry = System.currentTimeMillis();
+        final int port = state == STATE_UP ? native_socksPort() : 0;
+        new Thread(() -> {
+            try {
+                if (enrollMasque(prefs(), port) && current(mine)) {
+                    FileLog.d("zsg_warp masque account enrolled" + (port > 0 ? " through the tunnel" : ""));
+                    if (native_state() != STATE_UP) {
+                        native_stop();
+                        startTunnel();  // the engine restarts with the fallback
+                    }
+                }
+            } catch (Throwable t) {
+                FileLog.e(t);
+            } finally {
+                enrollingMasque = false;
+            }
+        }, "zsg-warp-enroll").start();
+    }
+
     private static boolean startTunnel() {
         final SharedPreferences preferences = prefs();
         final boolean haveWireGuard = !preferences.getString("private_key", "").isEmpty() && !preferences.getString("peer_public_key", "").isEmpty()
@@ -211,7 +249,7 @@ public final class WarpEntry {
         busyRegistering = true;
         boolean wireGuardOk = haveWireGuard || register(preferences);
         // The MASQUE account (a second device with an ECDSA key) is the fallback for networks that drop WireGuard's UDP.
-        boolean masqueOk = !preferences.getString("masque_key", "").isEmpty() || enrollMasque(preferences);
+        boolean masqueOk = !preferences.getString("masque_key", "").isEmpty();
         busyRegistering = false;
         if (!wireGuardOk && !masqueOk) {
             return false;
@@ -230,7 +268,7 @@ public final class WarpEntry {
      * A throw-away WARP device is registered like the WireGuard one and then enrolled with an ECDSA P-256 key (a PATCH with the
      * device token). HttpURLConnection has no PATCH, so both calls go through a small HTTPS client.
      */
-    private static boolean enrollMasque(SharedPreferences preferences) {
+    private static boolean enrollMasque(SharedPreferences preferences, int socksPort) {
         try {
             final String[] masqueKeys = native_masqueKeypair();
             final String[] wireGuardKeys = native_keypair();
@@ -250,7 +288,7 @@ public final class WarpEntry {
             body.put("key_type", "curve25519");
             body.put("tunnel_type", "wireguard");
             body.put("locale", "en-US");
-            String[] answer = httpsRequest("POST", MASQUE_API_PATH, null, body.toString());
+            String[] answer = httpsRequest("POST", MASQUE_API_PATH, null, body.toString(), socksPort);
             if (answer == null || !answer[0].startsWith("2")) {
                 FileLog.e("zsg_warp masque device registration failed: " + (answer == null ? "no answer" : answer[0]));
                 return false;
@@ -266,7 +304,7 @@ public final class WarpEntry {
             patch.put("key_type", "secp256r1");
             patch.put("tunnel_type", "masque");
             patch.put("name", "Android");
-            answer = httpsRequest("PATCH", MASQUE_API_PATH + "/" + id, token, patch.toString());
+            answer = httpsRequest("PATCH", MASQUE_API_PATH + "/" + id, token, patch.toString(), socksPort);
             if (answer == null || !answer[0].startsWith("2")) {
                 FileLog.e("zsg_warp masque enrollment failed: " + (answer == null ? "no answer" : answer[0]));
                 return false;
@@ -315,10 +353,15 @@ public final class WarpEntry {
     }
 
     /** A minimal HTTPS/1.1 client (any method, bearer token, JSON body): {status line, body} or null. */
-    private static String[] httpsRequest(String method, String path, String bearer, String body) throws Exception {
+    private static String[] httpsRequest(String method, String path, String bearer, String body, int socksPort) throws Exception {
         final javax.net.ssl.SSLSocketFactory factory = (javax.net.ssl.SSLSocketFactory) javax.net.ssl.SSLSocketFactory.getDefault();
-        try (javax.net.ssl.SSLSocket socket = (javax.net.ssl.SSLSocket) factory.createSocket()) {
-            socket.connect(new java.net.InetSocketAddress(API_HOST, 443), 20000);
+        // With |socksPort| the request goes out through the WARP tunnel itself (the provider drops this API by name on some
+        // networks, while a tunnel that is already up reaches it from inside Cloudflare's network).
+        final java.net.Socket plain = socksPort > 0
+                ? new java.net.Socket(new java.net.Proxy(java.net.Proxy.Type.SOCKS, new java.net.InetSocketAddress("127.0.0.1", socksPort)))
+                : new java.net.Socket();
+        plain.connect(socksPort > 0 ? java.net.InetSocketAddress.createUnresolved(API_HOST, 443) : new java.net.InetSocketAddress(API_HOST, 443), 20000);
+        try (javax.net.ssl.SSLSocket socket = (javax.net.ssl.SSLSocket) factory.createSocket(plain, API_HOST, 443, true)) {
             socket.setSoTimeout(20000);
             socket.startHandshake();
             if (!javax.net.ssl.HttpsURLConnection.getDefaultHostnameVerifier().verify(API_HOST, socket.getSession())) {

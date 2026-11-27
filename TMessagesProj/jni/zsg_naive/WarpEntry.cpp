@@ -18,6 +18,7 @@ namespace {
 std::mutex warpMutex;
 zsg_warp_t *warpHandle = nullptr;  // guarded by warpMutex; the pointer is only freed under it
 std::atomic<int> warpStateCache{ZSG_WARP_FAILED};
+std::atomic<int> warpSocksPort{0};  // the engine's loopback SOCKS5 port (0 when stopped)
 
 bool IsPublicIpv4(const sockaddr_in &address) {
     if (address.sin_family != AF_INET) {
@@ -110,10 +111,14 @@ jboolean nativeStart(JNIEnv *env, jclass, jstring privateKey, jstring peerKey, j
     }
     if (warpHandle == nullptr) {
         warpStateCache = ZSG_WARP_FAILED;
+        warpSocksPort = 0;
         return JNI_FALSE;
     }
+    warpSocksPort = socksPort;
     return JNI_TRUE;
 }
+
+jint nativeSocksPort(JNIEnv *, jclass) { return warpSocksPort.load(); }
 
 jobjectArray nativeMasqueKeypair(JNIEnv *env, jclass) {
     char priv[512] = {0};
@@ -158,6 +163,7 @@ jint nativeState(JNIEnv *, jclass) {
 void nativeStop(JNIEnv *, jclass) {
     std::lock_guard<std::mutex> lock(warpMutex);
     warpStateCache = ZSG_WARP_FAILED;
+    warpSocksPort = 0;
     if (warpHandle != nullptr) {
         zsg_warp_stop(warpHandle);
         warpHandle = nullptr;
@@ -179,6 +185,7 @@ const JNINativeMethod kMethods[] = {
      reinterpret_cast<void *>(nativeStart)},
     {"native_masqueKeypair", "()[Ljava/lang/String;", reinterpret_cast<void *>(nativeMasqueKeypair)},
     {"native_transport", "()I", reinterpret_cast<void *>(nativeTransport)},
+    {"native_socksPort", "()I", reinterpret_cast<void *>(nativeSocksPort)},
     {"native_stats", "()Ljava/lang/String;", reinterpret_cast<void *>(nativeStats)},
     {"native_state", "()I", reinterpret_cast<void *>(nativeState)},
     {"native_stop", "()V", reinterpret_cast<void *>(nativeStop)},
